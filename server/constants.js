@@ -102,10 +102,10 @@ const DEFAULT_AGENCIES = {
 // shape findUserLocation()/groupArrayFor() work with client-side.
 const SEED_USERS = [
   { id: "u1", name: "Noreen Jade Lozano", role: "SE", isAdmin: true, email: "noreen.lozano@maroonstudios.com", team: "SOC" },
-  { id: "u2", name: "Alvin Jarek Gonzales", role: "L2", isAdmin: false, email: "agonzales@company.com", team: "SOC" },
-  { id: "u3", name: "Andre Val Consorte", role: "Sr. SE", isAdmin: true, email: "aconsorte@company.com", team: "SOC" },
-  { id: "u4", name: "Rhea Lorenzana", role: "L1", isAdmin: false, email: "rlorenzana@company.com", team: "SOC" },
-  { id: "u5", name: "Gabriel Jethro Anunciacion", role: "L1", isAdmin: false, email: "ganunciacion@company.com", team: "SOC" },
+  { id: "u2", name: "Alvin Jarek Gonzales", role: "L2", isAdmin: false, email: "alvin.gonzales@maroonstudios.com", team: "SOC" },
+  { id: "u3", name: "Andre Val Consorte", role: "Sr. SE", isAdmin: true, email: "andre.consorte@maroonstudios.com", team: "SOC" },
+  { id: "u4", name: "Rhea Lorenzana", role: "L1", isAdmin: false, email: "rhea.lorenzana@maroonstudios.com", team: "SOC" },
+  { id: "u5", name: "Gabriel Jethro Anunciacion", role: "L1", isAdmin: false, email: "gabriel.anunciacion@maroonstudios.com", team: "SOC" },
   { id: "u6", name: "Miguel Luayon", role: "L1", isAdmin: false, email: "mluayon@company.com", team: "TI" },
   { id: "u7", name: "Rod Valdez", role: "SE", isAdmin: true, email: "rvaldez@company.com", team: "TI" },
   { id: "u8", name: "Jeshrine Zoe Nogar", role: "SE", isAdmin: false, email: "jnogar@company.com", team: "TI" },
