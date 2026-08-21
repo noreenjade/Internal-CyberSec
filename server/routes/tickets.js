@@ -42,15 +42,37 @@ function isUnassigned(assignee) {
 //     prefs.reassignment, emails BOTH the previous and new assignee.
 //   - someone -> unassigned, or no real change: no email either toggle's
 //     copy describes, so intentionally a no-op.
+// requestedBy is a free-text name (see the POST handler below), not a user
+// id — matching it by name against the roster (case-insensitive) is the
+// only way to resolve it to a real inbox/user; anyone who doesn't match a
+// real user (a department name, a typo, an external requester) resolves to
+// null rather than erroring.
+async function findRequesterUser(ticket) {
+  const name = (ticket.requestedBy || "").trim().toLowerCase();
+  if (!name) return null;
+  const users = await db.getAllUsers();
+  return users.find((u) => u.name.toLowerCase() === name) || null;
+}
+
 async function notifyAssignmentChange(ticket, oldAssignee) {
   const newAssignee = ticket.assignee;
   if (oldAssignee === newAssignee) return;
   const prefs = await db.getNotificationPrefs();
 
-  if (isUnassigned(oldAssignee) && !isUnassigned(newAssignee)) {
+  // Shows the ticket's requester as the visible sender (see mailer.js) when
+  // the requester matches a real roster user — falls back to the shared
+  // account's own address/display name otherwise (department requesters,
+  // typos, external requesters).
+  const requester = await findRequesterUser(ticket);
+  const isNewAssignment = isUnassigned(oldAssignee) && !isUnassigned(newAssignee);
+  const mailOptions = requester
+    ? { fromName: requester.name + " - " + (isNewAssignment ? "Create Ticket" : "Reassign Ticket"), replyTo: requester.email }
+    : undefined;
+
+  if (isNewAssignment) {
     if (!prefs.newAssignment) return;
     const user = await db.getUserById(newAssignee);
-    if (user) notifyAsync(user.email, "New ticket assigned: " + ticket.id, "You've been assigned " + ticket.id + " — " + ticket.title + ".\n\nDetails:\n" + ticket.details);
+    if (user) notifyAsync(user.email, "New ticket assigned: " + ticket.id, "You've been assigned " + ticket.id + " — " + ticket.title + ".\n\nDetails:\n" + ticket.details, mailOptions);
     return;
   }
 
@@ -62,14 +84,16 @@ async function notifyAssignmentChange(ticket, oldAssignee) {
       notifyAsync(
         prevUser.email,
         "Ticket " + ticket.id + " reassigned",
-        ticket.id + " — " + ticket.title + " has been reassigned to " + (newUser ? newUser.name : "another analyst") + "."
+        ticket.id + " — " + ticket.title + " has been reassigned to " + (newUser ? newUser.name : "another analyst") + ".",
+        mailOptions
       );
     }
     if (newUser) {
       notifyAsync(
         newUser.email,
         "Ticket reassigned to you: " + ticket.id,
-        "You've been assigned " + ticket.id + " — " + ticket.title + (prevUser ? " (reassigned from " + prevUser.name + ")" : "") + ".\n\nDetails:\n" + ticket.details
+        "You've been assigned " + ticket.id + " — " + ticket.title + (prevUser ? " (reassigned from " + prevUser.name + ")" : "") + ".\n\nDetails:\n" + ticket.details,
+        mailOptions
       );
     }
   }
@@ -87,10 +111,7 @@ async function notifyAssignmentChange(ticket, oldAssignee) {
 // isn't gated by the Status Change Notifications setting, which only ever
 // governed the assignee-facing copy.
 async function notifyRequesterOnResolve(ticket) {
-  const name = (ticket.requestedBy || "").trim().toLowerCase();
-  if (!name) return;
-  const users = await db.getAllUsers();
-  const match = users.find((u) => u.name.toLowerCase() === name);
+  const match = await findRequesterUser(ticket);
   if (!match) return;
   const notes = ticket.rejectionReason ? "\n\nResolution notes:\n" + ticket.rejectionReason : "";
   notifyAsync(
@@ -381,6 +402,7 @@ router.post("/tickets/:id/comments", asyncRoute(async (req, res) => {
 
   const author = await db.getUserById(authorId);
   const authorName = author ? author.name : "Someone";
+  const mailOptions = author ? { fromName: authorName + " - Add Comment", replyTo: author.email } : undefined;
 
   // Notify the ticket's assignee of the new comment, unless they're the one
   // who just posted it, or they're also @mentioned in this same comment —
@@ -390,7 +412,7 @@ router.post("/tickets/:id/comments", asyncRoute(async (req, res) => {
   if (!isUnassigned(ticket.assignee) && ticket.assignee !== authorId && mentionedIds.indexOf(ticket.assignee) === -1) {
     const assignee = await db.getUserById(ticket.assignee);
     if (assignee) {
-      notifyAsync(assignee.email, "New comment on " + id, "A new comment was posted on " + id + " — " + ticket.title + ":\n\n" + text);
+      notifyAsync(assignee.email, "New comment on " + id, "A new comment was posted on " + id + " — " + ticket.title + ":\n\n" + text, mailOptions);
     }
   }
 
@@ -405,7 +427,8 @@ router.post("/tickets/:id/comments", asyncRoute(async (req, res) => {
     notifyAsync(
       mentionedUser.email,
       "You were mentioned on " + id,
-      authorName + " mentioned you in a comment on " + id + " — " + ticket.title + ":\n\n" + text
+      authorName + " mentioned you in a comment on " + id + " — " + ticket.title + ":\n\n" + text,
+      mailOptions
     );
   }
 

@@ -35,18 +35,33 @@ function isPlaceholderEmail(to) {
   return !!domain && PLACEHOLDER_EMAIL_DOMAINS.indexOf(domain.toLowerCase()) !== -1;
 }
 
-async function sendNotificationEmail(to, subject, text) {
+// options.fromName / options.replyTo let a notification show who actually
+// triggered it (the ticket's requester, a comment author) instead of always
+// reading as sent by whoever's SMTP_USER credentials are configured — the
+// underlying "from" ADDRESS still has to stay the authenticated SMTP account
+// (Gmail, and most real providers, reject or silently rewrite a From address
+// that isn't verified as an alias on that same account), but the DISPLAY
+// NAME on that address is just a string and can be anything. replyTo routes
+// an actual reply to the person who did the thing, not to whoever's account
+// is doing the sending.
+async function sendNotificationEmail(to, subject, text, options) {
+  options = options || {};
   if (!smtpConfigured || !to) return false;
   if (isPlaceholderEmail(to)) {
     console.warn("[mailer] Skipping send to placeholder address " + to + " — not a real inbox.");
     return false;
   }
   try {
+    const fromAddress = process.env.SMTP_FROM || process.env.SMTP_USER;
+    const from = options.fromName
+      ? '"' + String(options.fromName).replace(/"/g, "") + '" <' + fromAddress + ">"
+      : fromAddress;
     await transporter.sendMail({
-      from: process.env.SMTP_FROM || process.env.SMTP_USER,
+      from,
       to,
       subject,
-      text
+      text,
+      replyTo: options.replyTo || undefined
     });
     return true;
   } catch (err) {
@@ -57,8 +72,8 @@ async function sendNotificationEmail(to, subject, text) {
 
 // Fire-and-forget wrapper for call sites that must never let a mail failure
 // affect the HTTP response already being sent for the primary action.
-function notifyAsync(to, subject, text) {
-  sendNotificationEmail(to, subject, text).catch((err) => console.error("[mailer] notifyAsync error:", err));
+function notifyAsync(to, subject, text, options) {
+  sendNotificationEmail(to, subject, text, options).catch((err) => console.error("[mailer] notifyAsync error:", err));
 }
 
 module.exports = { sendNotificationEmail, notifyAsync, smtpConfigured };
