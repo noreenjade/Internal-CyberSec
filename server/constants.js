@@ -9,7 +9,7 @@
 // either — it's the isPaused/pausedAt flag layered on top of any of these.
 const STATUSES = ["New", "In Progress", "Canceled", "Resolved", "Rejected"];
 const TERMINAL_STATUSES = ["Canceled", "Resolved", "Rejected"];
-const PRIORITIES = ["Critical", "High", "Medium", "Low"];
+const PRIORITIES = ["Critical", "High", "Medium", "Low", "Informational"];
 // The two internal teams — who actually does the work. NSOC/QC are NOT
 // teams (see CLIENTS below) — an earlier pass briefly added "NSOC" as a
 // 3rd team before that was corrected; TEAMS stays exactly the original two.
@@ -57,15 +57,17 @@ const DEFAULT_NOTIFICATION_PREFS = { slaBreach: true, newAssignment: true, reass
 const DEFAULT_SLA_CONFIG = {
   SOC: {
     Critical: { hours: 2, color: "#8B5CF6", label: "Violet" },
-    High: { hours: 4, color: "#F97316", label: "Orange" },
-    Medium: { hours: 8, color: "#EF4444", label: "Red" },
-    Low: { hours: 24, color: "#EAB308", label: "Yellow" }
+    High: { hours: 4, color: "#EF4444", label: "Red" },
+    Medium: { hours: 8, color: "#F97316", label: "Orange" },
+    Low: { hours: 24, color: "#EAB308", label: "Yellow" },
+    Informational: { hours: 48, color: "#3B82F6", label: "Blue" }
   },
   TI: {
     Critical: { hours: 2, color: "#8B5CF6", label: "Violet" },
-    High: { hours: 4, color: "#F97316", label: "Orange" },
-    Medium: { hours: 8, color: "#EF4444", label: "Red" },
-    Low: { hours: 24, color: "#EAB308", label: "Yellow" }
+    High: { hours: 4, color: "#EF4444", label: "Red" },
+    Medium: { hours: 8, color: "#F97316", label: "Orange" },
+    Low: { hours: 24, color: "#EAB308", label: "Yellow" },
+    Informational: { hours: 48, color: "#3B82F6", label: "Blue" }
   }
 };
 

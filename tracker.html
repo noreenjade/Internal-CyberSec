@@ -987,15 +987,17 @@
   var DEFAULT_SLA_CONFIG = {
     SOC: {
       Critical: { hours: 2, color: "#8B5CF6", label: "Violet" },
-      High: { hours: 4, color: "#F97316", label: "Orange" },
-      Medium: { hours: 8, color: "#EF4444", label: "Red" },
-      Low: { hours: 24, color: "#EAB308", label: "Yellow" }
+      High: { hours: 4, color: "#EF4444", label: "Red" },
+      Medium: { hours: 8, color: "#F97316", label: "Orange" },
+      Low: { hours: 24, color: "#EAB308", label: "Yellow" },
+      Informational: { hours: 48, color: "#3B82F6", label: "Blue" }
     },
     TI: {
       Critical: { hours: 2, color: "#8B5CF6", label: "Violet" },
-      High: { hours: 4, color: "#F97316", label: "Orange" },
-      Medium: { hours: 8, color: "#EF4444", label: "Red" },
-      Low: { hours: 24, color: "#EAB308", label: "Yellow" }
+      High: { hours: 4, color: "#EF4444", label: "Red" },
+      Medium: { hours: 8, color: "#F97316", label: "Orange" },
+      Low: { hours: 24, color: "#EAB308", label: "Yellow" },
+      Informational: { hours: 48, color: "#3B82F6", label: "Blue" }
     }
   };
 
@@ -1737,6 +1739,18 @@
         if (valid) {
           Object.keys(TEAMS).forEach(function (key) { USERS[key] = data[key]; });
           LEADERSHIP = data.LEADERSHIP;
+          // userIdSeq starts from the hardcoded seed count (10) on every page
+          // load, before this fetch resolves. If we don't resync it to the
+          // real roster here, nextUserId() re-mints "u11" on the first add of
+          // every fresh session, colliding with whatever id a previous
+          // session already persisted — the collision trips the primary-key
+          // constraint in replaceRoster(), the PUT fails, and the add
+          // silently vanishes on the next refresh even though it appeared to
+          // save locally.
+          getAllUsers().forEach(function (u) {
+            var n = parseInt(String(u.id || "").replace(/^u/, ""), 10);
+            if (!isNaN(n) && n > userIdSeq) userIdSeq = n;
+          });
           // Already exactly what the server has — seed persistRoster()'s
           // diff baseline so the render() this triggers doesn't turn right
           // around and PUT the same data straight back.
@@ -1834,7 +1848,7 @@
     onlyMyTickets: false,
     assigneeFilter: "", // "" = All Assignees, "unassigned" = Unassigned, else a user id
     clientFilter: "", // "" = All Clients, else a value from CLIENTS
-    priorityFilter: "", // "" = All Priorities, else "Critical" | "High" | "Medium" | "Low" — sidebar Priority Filters
+    priorityFilter: "", // "" = All Priorities, else "Critical" | "High" | "Medium" | "Low" | "Informational" — sidebar Priority Filters
     specificDateFilter: "", // "" = no filter, else a "YYYY-MM-DD" string from the board's date picker — filters tickets to that exact creation date
     agencyFilter: "", // "" = All Agencies (also matches tickets with no agency set), else an agency name — only meaningful when clientFilter === "NSOC"
     agencyFilterQuery: "", // raw text currently typed in the Agency filter combobox, may not be committed yet
@@ -2350,10 +2364,10 @@
     // priorityFilter is deliberately NOT one of the filters inside
     // filteredTeamTickets() (same reason statusFilter isn't): picking a
     // priority narrows the board to just that priority, but the sidebar
-    // itself keeps showing the full Critical/High/Medium/Low breakdown so
-    // it stays useful as an at-a-glance comparison, not just a mirror of
-    // whichever one is currently selected.
-    var priorityOrder = ["Critical", "High", "Medium", "Low"];
+    // itself keeps showing the full Critical/High/Medium/Low/Informational
+    // breakdown so it stays useful as an at-a-glance comparison, not just a
+    // mirror of whichever one is currently selected.
+    var priorityOrder = ["Critical", "High", "Medium", "Low", "Informational"];
     var teamPriorityCfg = state.slaConfig[state.team] || {};
     var ticketsForPriorityCounts = filteredTeamTickets();
     var priorityCounts = { All: ticketsForPriorityCounts.length };
