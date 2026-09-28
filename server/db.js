@@ -337,18 +337,37 @@ async function seedIfEmpty() {
     }
   }
 
+  // Checked per (team, priority), not just per team: a team that already had
+  // rows seeded long ago (e.g. before "Informational" was added to
+  // DEFAULT_SLA_CONFIG) would otherwise have count > 0 and skip seeding
+  // entirely, permanently missing the new priority. Per-pair checks mean a
+  // genuinely missing priority still gets its default row inserted on an
+  // already-populated team/DB.
+  //
+  // For a priority that already has a row, color/label are re-synced to
+  // DEFAULT_SLA_CONFIG on every boot (hours is left untouched). color/label
+  // aren't exposed as editable anywhere in the app — the SLA Configurations
+  // panel only lets an admin edit hours — so they can only ever be "stale
+  // defaults from before a color was corrected in code," never an admin's
+  // own customization, making it safe to always overwrite. This is what
+  // actually rolls the Red/Orange swap (High/Medium) out to a database that
+  // was already seeded under the old colors, which a plain insert-if-missing
+  // would otherwise never touch.
   for (const team of TEAMS) {
-    const count = Number((await pool.query("SELECT COUNT(*) AS c FROM sla_config WHERE team = $1", [team])).rows[0].c);
-    if (count === 0) {
-      await withTransaction(async (client) => {
-        for (const priority of Object.keys(DEFAULT_SLA_CONFIG[team])) {
-          const cfg = DEFAULT_SLA_CONFIG[team][priority];
-          await client.query(
-            "INSERT INTO sla_config (team, priority, hours, color, label, updated_by) VALUES ($1, $2, $3, $4, $5, NULL)",
-            [team, priority, cfg.hours, cfg.color, cfg.label]
-          );
-        }
-      });
+    for (const priority of Object.keys(DEFAULT_SLA_CONFIG[team])) {
+      const cfg = DEFAULT_SLA_CONFIG[team][priority];
+      const existing = (await pool.query("SELECT 1 FROM sla_config WHERE team = $1 AND priority = $2", [team, priority])).rowCount > 0;
+      if (existing) {
+        await pool.query(
+          "UPDATE sla_config SET color = $3, label = $4 WHERE team = $1 AND priority = $2",
+          [team, priority, cfg.color, cfg.label]
+        );
+      } else {
+        await pool.query(
+          "INSERT INTO sla_config (team, priority, hours, color, label, updated_by) VALUES ($1, $2, $3, $4, $5, NULL)",
+          [team, priority, cfg.hours, cfg.color, cfg.label]
+        );
+      }
     }
   }
 
