@@ -4069,6 +4069,15 @@
     var tableScrollSnapshots = Array.prototype.map.call(document.querySelectorAll(".table-scroll-wrap"), function (el) {
       return el.scrollLeft;
     });
+    // Same problem, same fix, for the Assignees checklist — checking a box
+    // fires a full render() (see assignee-toggle), which was silently
+    // snapping a scrolled-down list back to its top every single time,
+    // making it look like the click "didn't work" if the person you meant
+    // to check had already scrolled out of view. Only one picker is ever
+    // open at once, so a plain index-based snapshot is enough here too.
+    var assigneeChecklistScrollSnapshots = Array.prototype.map.call(document.querySelectorAll(".assignee-checklist"), function (el) {
+      return el.scrollTop;
+    });
     // Same problem, same fix, for the board search box: typing a search
     // query needs the board to re-filter on every keystroke, which means a
     // full render() per character — but render() tearing down and rebuilding
@@ -4119,6 +4128,10 @@
       var newTableScrollWraps = document.querySelectorAll(".table-scroll-wrap");
       for (var ti = 0; ti < newTableScrollWraps.length && ti < tableScrollSnapshots.length; ti++) {
         newTableScrollWraps[ti].scrollLeft = tableScrollSnapshots[ti];
+      }
+      var newAssigneeChecklists = document.querySelectorAll(".assignee-checklist");
+      for (var ai = 0; ai < newAssigneeChecklists.length && ai < assigneeChecklistScrollSnapshots.length; ai++) {
+        newAssigneeChecklists[ai].scrollTop = assigneeChecklistScrollSnapshots[ai];
       }
       if (searchInputFocused) {
         var newSearchInput = document.querySelector('[data-role="board-search-input"]');
