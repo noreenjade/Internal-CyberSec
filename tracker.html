@@ -2096,12 +2096,22 @@
       '<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' + (names.length ? "" : "color:var(--text-faint)") + '">' + escapeHtml(summary) + "</span>" +
       '<span style="flex-shrink:0;color:var(--text-faint);display:inline-flex;transition:transform .15s;transform:rotate(' + (isOpen ? "180deg" : "0deg") + ')">' + I("chevronDown", 14) + "</span>" +
       "</button>";
-    if (!isOpen) return trigger;
+    // Wrapped in a container carrying the picker key so the outside-click
+    // cleanup below can check DOM containment ("is this click anywhere
+    // inside the open picker?") instead of matching specific data-action
+    // names — a click on the row's NAME TEXT lands on the <label>, not the
+    // <input> itself, so it never resolves to a "assignee-toggle" element
+    // via closest() (the input is a descendant, not an ancestor); matching
+    // by action name alone misread that as an outside click and closed the
+    // dropdown before the browser's native label→checkbox click forwarding
+    // could land, silently swallowing every click that wasn't precisely on
+    // the tiny checkbox square.
+    if (!isOpen) return '<div data-assignee-picker-box="' + escapeHtml(pickerKey) + '">' + trigger + "</div>";
     var rows = users.map(function (u) {
       var checked = selectedIds.indexOf(u.id) !== -1;
       return '<label class="mention-option"><input type="checkbox" data-action="assignee-toggle" data-picker="' + escapeHtml(pickerKey) + '" data-user="' + u.id + '"' + (checked ? " checked" : "") + ">" + escapeHtml(u.name) + " (" + escapeHtml(u.role) + ")</label>";
     }).join("");
-    return trigger + '<div class="assignee-checklist" style="margin-top:6px">' + rows + "</div>";
+    return '<div data-assignee-picker-box="' + escapeHtml(pickerKey) + '">' + trigger + '<div class="assignee-checklist" style="margin-top:6px">' + rows + "</div></div>";
   }
 
   function ticketCardHtml(t) {
@@ -4206,14 +4216,22 @@
     // instead of needing the same reset repeated in each handler.
     var closedRowMenu = false;
     if (openRowMenu && clickedAction !== "toggle-row-menu") { openRowMenu = null; closedRowMenu = true; }
-    // Same idea for the Assignees checklist — any click that isn't toggling
-    // it open/closed or checking one of its own boxes closes it, same as
-    // openRowMenu above. Checking a box must NOT close it (picking more than
-    // one person is the whole point), so that action is excluded here too.
+    // Same idea for the Assignees checklist — a click anywhere OUTSIDE the
+    // open picker's own box closes it, same as openRowMenu above. Checked by
+    // DOM containment, not by matching a specific data-action name: clicking
+    // a row's NAME TEXT lands on its <label>, not the <input> itself, and
+    // closest("[data-action]") only walks ANCESTORS — the checkbox is a
+    // descendant of that label, so it was never found, which used to read as
+    // "clicked outside" and close the dropdown before the browser's native
+    // label-to-checkbox click forwarding could land. That silently ate every
+    // click that wasn't precisely on the tiny checkbox square.
     var closedAssigneeDropdown = false;
-    if (openAssigneeDropdownFor && clickedAction !== "toggle-assignee-picker" && clickedAction !== "assignee-toggle") {
-      openAssigneeDropdownFor = null;
-      closedAssigneeDropdown = true;
+    if (openAssigneeDropdownFor) {
+      var insideOpenAssigneePicker = e.target.closest('[data-assignee-picker-box="' + cssEscape(openAssigneeDropdownFor) + '"]');
+      if (!insideOpenAssigneePicker) {
+        openAssigneeDropdownFor = null;
+        closedAssigneeDropdown = true;
+      }
     }
     if (!el) {
       if (stopBoundary) { if (closedRowMenu || closedAssigneeDropdown) render(); return; }
