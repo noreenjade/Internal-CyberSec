@@ -548,6 +548,9 @@
   .attachment-row .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .attachment-size { font-family: var(--font-mono); font-size: 10px; color: var(--text-faint); flex-shrink: 0; }
   .attachment-thumb { width: 30px; height: 30px; border-radius: 4px; object-fit: cover; cursor: zoom-in; flex-shrink: 0; border: 1px solid var(--border-soft); }
+  .attachment-actions { display: flex; gap: 10px; flex-shrink: 0; }
+  .attachment-action-link { font-size: 11px; font-weight: 600; color: var(--accent); text-decoration: none; }
+  .attachment-action-link:hover { text-decoration: underline; color: var(--accent-strong); }
   .image-lightbox-overlay { background: rgba(0,0,0,0.85); }
   .image-lightbox-close { position: fixed; top: 20px; right: 20px; border: none; background: rgba(255,255,255,0.12); color: #fff; }
   .format-note { font-size: 10px; color: var(--text-faint); margin-top: 8px; }
@@ -1157,20 +1160,26 @@
   // guards against above, and the same fix: a real dirty-check instead of
   // an unconditional PUT on every render.
   var lastSyncedCategoriesJson = JSON.stringify({ SOC: CATEGORIES.SOC, TI: CATEGORIES.TI });
+  // Returns a promise resolving to true once the server confirms the write
+  // (false on failure) — see persistAgencies()/persistTickets() for why:
+  // without this, adding/renaming/deleting a category looked saved
+  // immediately but a refresh before the PUT actually landed (or a failed
+  // request) silently dropped it.
   function persistCategories() {
     var current = JSON.stringify({ SOC: CATEGORIES.SOC, TI: CATEGORIES.TI });
-    if (current === lastSyncedCategoriesJson) return true; // nothing changed since the last successful sync
-    fetch(API_BASE_URL + "/categories", {
+    if (current === lastSyncedCategoriesJson) return Promise.resolve(true); // nothing changed since the last successful sync
+    return fetch(API_BASE_URL + "/categories", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: current
     }).then(function (res) {
       if (!res.ok) throw new Error("HTTP " + res.status);
       lastSyncedCategoriesJson = current;
+      return true;
     }).catch(function (err) {
       console.error("Could not persist categories to server:", err);
+      return false;
     });
-    return true;
   }
   loadCategoriesIfSaved(); // kick off the background fetch before the first render uses CATEGORIES
 
@@ -1202,20 +1211,27 @@
       });
   }
   var lastSyncedAgenciesJson = JSON.stringify({ NSOC: AGENCIES.NSOC });
+  // Returns a promise resolving to true once the server has actually
+  // confirmed the write (false on failure) — same reasoning as
+  // persistTickets(): adding an agency in Manage Agencies looked like it
+  // saved (it's in AGENCIES.NSOC immediately), but with nothing waiting on
+  // the PUT actually landing, a refresh before it finished (or a failed
+  // request) silently dropped it, and it just never showed up again.
   function persistAgencies() {
     var current = JSON.stringify({ NSOC: AGENCIES.NSOC });
-    if (current === lastSyncedAgenciesJson) return true; // nothing changed since the last successful sync
-    fetch(API_BASE_URL + "/agencies", {
+    if (current === lastSyncedAgenciesJson) return Promise.resolve(true); // nothing changed since the last successful sync
+    return fetch(API_BASE_URL + "/agencies", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: current
     }).then(function (res) {
       if (!res.ok) throw new Error("HTTP " + res.status);
       lastSyncedAgenciesJson = current;
+      return true;
     }).catch(function (err) {
       console.error("Could not persist agencies to server:", err);
+      return false;
     });
-    return true;
   }
   loadAgenciesIfSaved(); // kick off the background fetch before the first render uses AGENCIES
 
@@ -1242,20 +1258,23 @@
       });
   }
   var lastSyncedClientsJson = JSON.stringify(CLIENTS);
+  // Same promise-returning confirmation as persistCategories()/
+  // persistAgencies() above.
   function persistClients() {
     var current = JSON.stringify(CLIENTS);
-    if (current === lastSyncedClientsJson) return true; // nothing changed since the last successful sync
-    fetch(API_BASE_URL + "/clients", {
+    if (current === lastSyncedClientsJson) return Promise.resolve(true); // nothing changed since the last successful sync
+    return fetch(API_BASE_URL + "/clients", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: current
     }).then(function (res) {
       if (!res.ok) throw new Error("HTTP " + res.status);
       lastSyncedClientsJson = current;
+      return true;
     }).catch(function (err) {
       console.error("Could not persist clients to server:", err);
+      return false;
     });
-    return true;
   }
   loadClientsIfSaved(); // kick off the background fetch before the first render uses CLIENTS
 
@@ -1364,12 +1383,14 @@
   var STATUSES = ["New", "In Progress", "Canceled", "Resolved", "Rejected"];
   var TERMINAL_STATUSES = ["Canceled", "Resolved", "Rejected"];
   var ATTACHMENT_ACCEPT = ".pdf,.png,.jpg,.jpeg,.doc,.docx,.xls,.xlsx,.txt";
-  // Only image attachments get their bytes stored (as a base64 data URI, in
-  // MAX_IMAGE_ATTACHMENT_BYTES below) so they can actually be viewed later —
-  // non-image files stay metadata-only, same as before. Cap keeps a single
-  // pasted/attached screenshot (and the full tickets array persistTickets()
-  // PUTs on every save) from ballooning past the server's JSON body limit.
-  var MAX_IMAGE_ATTACHMENT_BYTES = 5 * 1024 * 1024;
+  // Every accepted type gets its actual bytes stored (as a base64 data URI)
+  // so it can be viewed/downloaded later by anyone who can open the ticket —
+  // not just images anymore; a PDF/.docx/.xlsx/.txt with no stored bytes was
+  // exactly the "attached but can never be opened again" gap this closes.
+  // The cap (same limit for every type, not just images) keeps a single
+  // attachment — and the full tickets array persistTickets() PUTs on every
+  // save — from ballooning past the server's JSON body limit.
+  var MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024;
 
   // =====================================================================
   // ICONS — minimal inline SVGs (no external icon library / CDN allowed)
@@ -1789,20 +1810,25 @@
   // sees "nothing has changed yet" and skips the network round-trip, exactly
   // like persistTickets()'s dirty-check already does for tickets.
   var lastSyncedRosterJson = JSON.stringify(rosterSnapshot());
+  // Same promise-returning confirmation as persistTickets()/persistAgencies()
+  // /persistCategories()/persistClients() above — adding/editing/removing a
+  // team member looked saved immediately, but nothing waited on the PUT
+  // actually reaching the server.
   function persistRoster() {
     var current = JSON.stringify(rosterSnapshot());
-    if (current === lastSyncedRosterJson) return true; // nothing changed since the last successful sync
-    fetch(API_BASE_URL + "/roster", {
+    if (current === lastSyncedRosterJson) return Promise.resolve(true); // nothing changed since the last successful sync
+    return fetch(API_BASE_URL + "/roster", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: current
     }).then(function (res) {
       if (!res.ok) throw new Error("HTTP " + res.status);
       lastSyncedRosterJson = current;
+      return true;
     }).catch(function (err) {
       console.error("Could not persist roster to server:", err);
+      return false;
     });
-    return true;
   }
   loadRosterIfSaved(); // kick off the background fetch before the first render uses USERS/LEADERSHIP
 
@@ -2938,6 +2964,7 @@
   var addingAgencyClient = null; // "NSOC" | null — which client's add-row is open
   var agencyPageSize = 10; // rows per page — shared across clients, since only one Agencies list is ever on screen at once
   var agencyPage = {}; // client -> current page index (0-based); missing/undefined means page 0
+  var agencyManageSearchQuery = {}; // client -> current text in the Manage Agencies search box (live-filters the table, independent of the Agency combobox's own search elsewhere)
 
   // Which row's "⋮" action dropdown (Roster/Categories/Agencies) is
   // currently open, as an arbitrary unique string key — null means none.
@@ -3151,14 +3178,35 @@
     }).join("");
 
     var attachmentsHtml = (t.attachments || []).map(function (a) {
-      // Only attachments with a stored dataUrl (images, added via the file
-      // picker or pasted into Details/the reason modal) can show a real
-      // preview — older/non-image attachments stay a plain paperclip icon
-      // since only their name/size was ever recorded.
-      var icon = a.dataUrl
+      // Every accepted type (image, PDF, Office doc, txt) now has its actual
+      // bytes stored as a base64 data URI (see MAX_ATTACHMENT_BYTES / the
+      // file-selected handler) — anyone who can open this ticket, any
+      // assignee included, can view or download it, not just whoever
+      // uploaded it. Only attachments added before this shipped stay
+      // metadata-only (no dataUrl was ever recorded for them), so those
+      // still fall back to a plain, non-interactive paperclip.
+      var isImage = a.dataUrl && a.dataUrl.indexOf("data:image/") === 0;
+      var isPdf = a.dataUrl && a.dataUrl.indexOf("data:application/pdf") === 0;
+      var icon = isImage
         ? '<img src="' + a.dataUrl + '" class="attachment-thumb" data-action="preview-attachment" alt="' + escapeHtml(a.name) + '">'
         : I("paperclip", 12);
-      return '<div class="attachment-row">' + icon + '<span class="name">' + escapeHtml(a.name) + '</span><span class="attachment-size mono">' + formatBytes(a.size) + "</span>" +
+      // download="" (not just href) is what stops the browser from trying to
+      // navigate to / re-render a data URI as a page (which can mangle a
+      // binary .docx/.xlsx) and instead saves the exact original bytes under
+      // the original filename+extension — same reason a PDF gets a separate
+      // "View" link (target=_blank, no download attribute) alongside its
+      // "Download" one, so opening it in the browser's own PDF viewer
+      // doesn't also imply saving a copy.
+      var actions = "";
+      if (a.dataUrl && !isImage) {
+        if (isPdf) {
+          actions += '<a href="' + a.dataUrl + '" target="_blank" rel="noopener" class="attachment-action-link">View</a>';
+        }
+        actions += '<a href="' + a.dataUrl + '" download="' + escapeHtml(a.name) + '" class="attachment-action-link">Download</a>';
+      }
+      return '<div class="attachment-row">' + icon + '<span class="name">' + escapeHtml(a.name) + '</span>' +
+        (actions ? '<span class="attachment-actions">' + actions + "</span>" : "") +
+        '<span class="attachment-size mono">' + formatBytes(a.size) + "</span>" +
         '<button type="button" class="icon-btn" style="height:22px;width:22px;border:none;flex-shrink:0" data-action="delete-attachment" data-id="' + t.id + '" data-attachment="' + a.id + '" title="Remove attachment">' + I("trash", 12) + "</button>" +
         "</div>";
     }).join("");
@@ -3648,20 +3696,35 @@
   // Exact mirror of categoryListHtml/categoriesPanelHtml above, scoped to
   // AGENCIES/"NSOC" instead of CATEGORIES/team.
   function agencyListHtml(client) {
-    var list = AGENCIES[client] || [];
+    var fullList = AGENCIES[client] || [];
+    // Search filters by name (case-insensitive substring) before pagination
+    // — keeps each entry's REAL index into AGENCIES[client] attached, since
+    // edit/delete act on that array directly, not on whatever subset is
+    // currently visible.
+    var searchQuery = (agencyManageSearchQuery[client] || "").trim().toLowerCase();
+    var matches = fullList
+      .map(function (name, i) { return { name: name, index: i }; })
+      .filter(function (item) { return !searchQuery || item.name.toLowerCase().indexOf(searchQuery) !== -1; })
+      // Alphabetical for display only — each item still carries its real
+      // index into AGENCIES[client], so edit/delete keep acting on the
+      // right entry regardless of the sorted display order.
+      .sort(function (a, b) { return a.name.localeCompare(b.name); });
     // Paginated — a real NSOC roster can run into the hundreds, and
     // rendering/scrolling a single flat table of all of them stopped being
     // usable well before that. Page index is clamped against the current
-    // list length (not just trusted from agencyPage) so deleting the last
-    // agency on the last page doesn't strand the view on a now-empty page.
-    var totalPages = Math.max(1, Math.ceil(list.length / agencyPageSize));
+    // (filtered) match count, not just trusted from agencyPage, so deleting
+    // the last agency on the last page — or typing a search that narrows the
+    // results — never strands the view on a now-empty/out-of-range page.
+    var totalPages = Math.max(1, Math.ceil(matches.length / agencyPageSize));
     var currentPage = Math.min(agencyPage[client] || 0, totalPages - 1);
     var startIdx = currentPage * agencyPageSize;
-    var endIdx = Math.min(startIdx + agencyPageSize, list.length);
-    var pageAgencies = list.slice(startIdx, endIdx);
+    var endIdx = Math.min(startIdx + agencyPageSize, matches.length);
+    var pageMatches = matches.slice(startIdx, endIdx);
+    var list = matches; // rangeLabel/pagination below counts filtered matches, not the full roster
 
-    var rows = pageAgencies.map(function (agency, localIdx) {
-      var idx = startIdx + localIdx; // real index into AGENCIES[client], not just this page
+    var rows = pageMatches.map(function (item) {
+      var agency = item.name;
+      var idx = item.index; // real index into AGENCIES[client], not just this page/filtered view
       if (editingAgency && editingAgency.client === client && editingAgency.index === idx) {
         return "<tr><td><input type=\"text\" class=\"field-input\" style=\"padding:6px 8px;font-size:13px\" data-role=\"agency-edit-name\" value=\"" + escapeHtml(agency) + "\"></td>" +
           '<td style="text-align:right;white-space:nowrap">' +
@@ -3700,14 +3763,20 @@
       '<button type="button" class="icon-btn" style="height:26px;width:26px;border:none" data-action="agency-page-last" data-client="' + client + '"' + (currentPage >= totalPages - 1 ? " disabled" : "") + ' title="Last page">»</button>' +
       "</div></div>";
 
+    var countLabel = searchQuery ? list.length + " of " + fullList.length : String(fullList.length);
+    var emptyMessage = fullList.length === 0
+      ? "No agencies yet — add one above."
+      : "No agencies match “" + escapeHtml(searchQuery) + "”.";
+
     return '<div class="settings-card">' +
-      '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">' +
-      '<p class="settings-card-title" style="margin:0">' + escapeHtml(client) + " Agencies (" + list.length + ")</p>" +
+      '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;gap:12px;flex-wrap:wrap">' +
+      '<p class="settings-card-title" style="margin:0">' + escapeHtml(client) + " Agencies (" + countLabel + ")</p>" +
       '<button type="button" class="btn-secondary" data-action="agency-add-start" data-client="' + client + '"' + (addingAgencyClient ? " disabled" : "") + ">+ Add Agency</button>" +
       "</div>" +
+      '<input type="text" class="field-input" style="margin-bottom:12px" placeholder="Search agencies by name..." data-role="agency-manage-search" data-client="' + client + '" value="' + escapeHtml(agencyManageSearchQuery[client] || "") + '">' +
       '<div class="table-scroll-wrap" style="overflow-x:auto"><table class="roster-table"><thead><tr><th>Agency Name</th><th style="text-align:right">Actions</th></tr></thead><tbody>' +
       addRow + rows +
-      (list.length === 0 && !addRow ? '<tr><td colspan="2" class="footnote" style="padding:12px 0">No agencies yet — add one above.</td></tr>' : "") +
+      (list.length === 0 && !addRow ? '<tr><td colspan="2" class="footnote" style="padding:12px 0">' + emptyMessage + "</td></tr>" : "") +
       "</tbody></table></div>" +
       (list.length > 0 ? paginationBar : "") +
       "</div>";
@@ -3715,7 +3784,7 @@
 
   function agenciesPanelHtml() {
     return '<div class="settings-panel-head"><h2>' + I("listChecks", 17) + " Manage Agencies</h2>" +
-      "<p>The NSOC agencies analysts pick from when a ticket's Client is set to NSOC. Add, rename, or remove them here — the Create Ticket form and every open ticket's Agency field pick up the change immediately. Renaming or deleting an agency never rewrites tickets that already used the old name; they keep showing their original value. With a long list, use the <b>Rows per page</b> dropdown below the table to show more agencies at once (10, 25, 50, or 100), and the page arrows to move through the rest.</p></div>" +
+      "<p>Agencies analysts pick when a ticket's Client is NSOC. Changes apply immediately; renaming or deleting never rewrites tickets that already used the old name.</p></div>" +
       agencyListHtml("NSOC");
   }
 
@@ -3956,6 +4025,12 @@
     // Snapshot it before teardown, restore it on the freshly built input.
     var searchInputFocused = document.activeElement && document.activeElement.matches && document.activeElement.matches('[data-role="board-search-input"]');
     var searchSelection = searchInputFocused ? { start: document.activeElement.selectionStart, end: document.activeElement.selectionEnd } : null;
+    // Same live-filter-as-you-type problem/fix as the board search box above,
+    // generalized to any input carrying data-role="agency-manage-search" (the
+    // Manage Agencies search box) — scoped by data-client since more than one
+    // client's list could theoretically be on screen.
+    var agencySearchFocusedEl = document.activeElement && document.activeElement.matches && document.activeElement.matches('[data-role="agency-manage-search"]') ? document.activeElement : null;
+    var agencySearchSelection = agencySearchFocusedEl ? { client: agencySearchFocusedEl.getAttribute("data-client"), start: agencySearchFocusedEl.selectionStart, end: agencySearchFocusedEl.selectionEnd } : null;
     // A render-time exception must never leave the screen silently frozen —
     // surface it and recover to a safe board view instead of a blank #app.
     try {
@@ -3998,6 +4073,13 @@
         if (newSearchInput) {
           newSearchInput.focus();
           newSearchInput.setSelectionRange(searchSelection.start, searchSelection.end);
+        }
+      }
+      if (agencySearchSelection) {
+        var newAgencySearchInput = document.querySelector('[data-role="agency-manage-search"][data-client="' + cssEscape(agencySearchSelection.client || "") + '"]');
+        if (newAgencySearchInput) {
+          newAgencySearchInput.focus();
+          newAgencySearchInput.setSelectionRange(agencySearchSelection.start, agencySearchSelection.end);
         }
       }
       // Every action in this app funnels through render() — persisting here,
@@ -4461,7 +4543,11 @@
       groupArrayFor(addUserDraft.groupKey).push(newUser);
       addingUser = false;
       addUserDraft = null;
-      render(); return;
+      render();
+      persistRoster().then(function (ok) {
+        showBackupToast(ok ? "Team member added." : "Could not save the new team member — check your connection and try again.");
+      });
+      return;
     }
     if (action === "roster-edit-start") {
       var editId = el.getAttribute("data-user");
@@ -4515,7 +4601,11 @@
       }
       editingUserId = null;
       editingUserDraft = null;
-      render(); return;
+      render();
+      persistRoster().then(function (ok) {
+        showBackupToast(ok ? "Team member saved." : "Could not save the changes — check your connection and try again.");
+      });
+      return;
     }
     if (action === "roster-delete") {
       var delId = el.getAttribute("data-user");
@@ -4540,7 +4630,11 @@
         var remaining = getAllUsers();
         state.currentUserId = remaining.length ? remaining[0].id : "";
       }
-      render(); return;
+      render();
+      persistRoster().then(function (ok) {
+        showBackupToast(ok ? "Team member deleted." : "Could not delete the team member — check your connection and try again.");
+      });
+      return;
     }
     if (action === "category-add-start") { addingCategoryTeam = el.getAttribute("data-team"); render(); return; }
     if (action === "category-add-cancel") { addingCategoryTeam = null; render(); return; }
@@ -4552,7 +4646,11 @@
       var dup = CATEGORIES[catAddTeam].some(function (c) { return c.toLowerCase() === catAddName.toLowerCase(); });
       if (!dup) CATEGORIES[catAddTeam].push(catAddName);
       addingCategoryTeam = null;
-      render(); return;
+      render();
+      persistCategories().then(function (ok) {
+        showBackupToast(ok ? "Category added." : "Could not save the new category — check your connection and try again.");
+      });
+      return;
     }
     if (action === "category-edit-start") {
       editingCategory = { team: el.getAttribute("data-team"), index: Number(el.getAttribute("data-index")) };
@@ -4569,7 +4667,11 @@
       // philosophy as priorityConfig), so nothing already-saved is rewritten.
       if (catRenamed && CATEGORIES[catEditTeam][catEditIndex] != null) CATEGORIES[catEditTeam][catEditIndex] = catRenamed;
       editingCategory = null;
-      render(); return;
+      render();
+      persistCategories().then(function (ok) {
+        showBackupToast(ok ? "Category saved." : "Could not save the rename — check your connection and try again.");
+      });
+      return;
     }
     if (action === "category-delete") {
       var catDelTeam = el.getAttribute("data-team");
@@ -4584,7 +4686,11 @@
         if (editingCategory.index === catDelIndex) editingCategory = null;
         else if (editingCategory.index > catDelIndex) editingCategory.index -= 1;
       }
-      render(); return;
+      render();
+      persistCategories().then(function (ok) {
+        showBackupToast(ok ? "Category deleted." : "Could not delete the category — check your connection and try again.");
+      });
+      return;
     }
     if (action === "client-add-start") { addingClient = true; render(); return; }
     if (action === "client-add-cancel") { addingClient = false; render(); return; }
@@ -4595,7 +4701,11 @@
       var clientDup = CLIENTS.some(function (c) { return c.toLowerCase() === clientAddName.toLowerCase(); });
       if (!clientDup) CLIENTS.push(clientAddName);
       addingClient = false;
-      render(); return;
+      render();
+      persistClients().then(function (ok) {
+        showBackupToast(ok ? "Client added." : "Could not save the new client — check your connection and try again.");
+      });
+      return;
     }
     if (action === "client-edit-start") {
       editingClientIndex = Number(el.getAttribute("data-index"));
@@ -4611,7 +4721,11 @@
       // nothing already-saved is rewritten.
       if (clientRenamed && CLIENTS[clientEditIndex] != null) CLIENTS[clientEditIndex] = clientRenamed;
       editingClientIndex = null;
-      render(); return;
+      render();
+      persistClients().then(function (ok) {
+        showBackupToast(ok ? "Client saved." : "Could not save the rename — check your connection and try again.");
+      });
+      return;
     }
     if (action === "client-delete") {
       var clientDelIndex = Number(el.getAttribute("data-index"));
@@ -4622,7 +4736,11 @@
         if (editingClientIndex === clientDelIndex) editingClientIndex = null;
         else if (editingClientIndex > clientDelIndex) editingClientIndex -= 1;
       }
-      render(); return;
+      render();
+      persistClients().then(function (ok) {
+        showBackupToast(ok ? "Client deleted." : "Could not delete the client — check your connection and try again.");
+      });
+      return;
     }
     if (action === "agency-add-start") { addingAgencyClient = el.getAttribute("data-client"); render(); return; }
     if (action === "agency-add-cancel") { addingAgencyClient = null; render(); return; }
@@ -4632,9 +4750,24 @@
       var agAddName = agAddEl ? agAddEl.value.trim() : "";
       if (!agAddName) return; // required — silently no-op, matching category-add-save
       var agDup = (AGENCIES[agAddClient] || []).some(function (a) { return a.toLowerCase() === agAddName.toLowerCase(); });
-      if (!agDup) { AGENCIES[agAddClient] = AGENCIES[agAddClient] || []; AGENCIES[agAddClient].push(agAddName); }
+      if (agDup) {
+        // Told, not just silently ignored — a no-op here used to close the
+        // add row with zero feedback, which reads as "it saved" when it
+        // actually didn't, and invites someone to try again and really end
+        // up with two near-identical rows once one attempt DOES go through.
+        showBackupToast('"' + agAddName + '" already exists — pick a different name.');
+        return;
+      }
+      AGENCIES[agAddClient] = AGENCIES[agAddClient] || [];
+      AGENCIES[agAddClient].push(agAddName);
       addingAgencyClient = null;
-      render(); return;
+      render();
+      // Confirms the write actually reached the server instead of trusting
+      // the optimistic in-memory push above — see persistAgencies().
+      persistAgencies().then(function (ok) {
+        showBackupToast(ok ? "Agency added." : "Could not save the new agency — check your connection and try again.");
+      });
+      return;
     }
     if (action === "agency-edit-start") {
       editingAgency = { client: el.getAttribute("data-client"), index: Number(el.getAttribute("data-index")) };
@@ -4649,9 +4782,23 @@
       // Renaming only ever changes the picklist entry itself — tickets store
       // their agency as a plain string snapshot, same as category, so
       // nothing already-saved is rewritten.
-      if (agRenamed && AGENCIES[agEditClient] && AGENCIES[agEditClient][agEditIndex] != null) AGENCIES[agEditClient][agEditIndex] = agRenamed;
+      if (agRenamed && AGENCIES[agEditClient] && AGENCIES[agEditClient][agEditIndex] != null) {
+        // Excludes the entry's OWN current index — renaming "X" back to
+        // exactly "X" (or just changing case) isn't creating a duplicate of
+        // anything, only colliding with a DIFFERENT row is.
+        var agRenameDup = AGENCIES[agEditClient].some(function (a, i) { return i !== agEditIndex && a.toLowerCase() === agRenamed.toLowerCase(); });
+        if (agRenameDup) {
+          showBackupToast('"' + agRenamed + '" already exists — pick a different name.');
+          return;
+        }
+        AGENCIES[agEditClient][agEditIndex] = agRenamed;
+      }
       editingAgency = null;
-      render(); return;
+      render();
+      persistAgencies().then(function (ok) {
+        showBackupToast(ok ? "Agency saved." : "Could not save the rename — check your connection and try again.");
+      });
+      return;
     }
     if (action === "agency-delete") {
       var agDelClient = el.getAttribute("data-client");
@@ -4661,7 +4808,11 @@
         if (editingAgency.index === agDelIndex) editingAgency = null;
         else if (editingAgency.index > agDelIndex) editingAgency.index -= 1;
       }
-      render(); return;
+      render();
+      persistAgencies().then(function (ok) {
+        showBackupToast(ok ? "Agency deleted." : "Could not delete the agency — check your connection and try again.");
+      });
+      return;
     }
     if (action === "agency-page-first") { agencyPage[el.getAttribute("data-client")] = 0; render(); return; }
     if (action === "agency-page-prev") {
@@ -4967,21 +5118,18 @@
       var files = Array.prototype.slice.call(el.files || []);
       el.value = ""; // allow re-selecting the exact same file again later
       if (!files.length) return;
-      var oversizedImages = files.filter(function (f) { return f.type.indexOf("image/") === 0 && f.size > MAX_IMAGE_ATTACHMENT_BYTES; });
-      if (oversizedImages.length) {
-        alert("Skipped (screenshots must be under 5MB): " + oversizedImages.map(function (f) { return f.name; }).join(", "));
+      var oversizedFiles = files.filter(function (f) { return f.size > MAX_ATTACHMENT_BYTES; });
+      if (oversizedFiles.length) {
+        alert("Skipped (files must be under 5MB): " + oversizedFiles.map(function (f) { return f.name; }).join(", "));
       }
-      var usableFiles = files.filter(function (f) { return oversizedImages.indexOf(f) === -1; });
+      var usableFiles = files.filter(function (f) { return oversizedFiles.indexOf(f) === -1; });
       if (!usableFiles.length) return;
-      // Images get their actual bytes read (as a base64 data URI) so they
-      // can be viewed later — every other accepted type stays metadata-only,
-      // same as before this feature. FileReader is async, so all files are
-      // read in parallel and the ticket is only updated/rendered once every
-      // one has resolved, to avoid clobbering each other's writes.
+      // Every usable file gets its actual bytes read (as a base64 data URI)
+      // so it can be viewed/downloaded later, not just images. FileReader is
+      // async, so all files are read in parallel and the ticket is only
+      // updated/rendered once every one has resolved, to avoid clobbering
+      // each other's writes.
       Promise.all(usableFiles.map(function (f) {
-        if (f.type.indexOf("image/") !== 0) {
-          return Promise.resolve({ id: uid(), name: f.name, size: f.size, addedAt: Date.now() });
-        }
         return new Promise(function (resolve) {
           var reader = new FileReader();
           reader.onload = function (ev) { resolve({ id: uid(), name: f.name, size: f.size, addedAt: Date.now(), dataUrl: ev.target.result }); };
@@ -5169,6 +5317,18 @@
       render();
       return;
     }
+    if (role === "agency-manage-search") {
+      var agSearchClient = el.getAttribute("data-client");
+      agencyManageSearchQuery[agSearchClient] = el.value;
+      // Narrowing the filter can leave a page index that no longer exists
+      // (e.g. you were on page 3 of the full list, typed a search that only
+      // matches 2 rows) — agencyListHtml() also clamps this defensively, but
+      // resetting to page 0 here means you don't land on a page that then
+      // immediately snaps somewhere else.
+      agencyPage[agSearchClient] = 0;
+      render();
+      return;
+    }
     if (role === "reject-reason-input") {
       if (rejectPrompt) rejectPrompt.text = el.value;
       var rejectBtn = document.querySelector('[data-action="submit-reject"]');
@@ -5272,7 +5432,7 @@
     var file = imageItem.getAsFile();
     if (!file) return;
     e.preventDefault();
-    if (file.size > MAX_IMAGE_ATTACHMENT_BYTES) { alert("Screenshot too large (max 5MB)."); return; }
+    if (file.size > MAX_ATTACHMENT_BYTES) { alert("Screenshot too large (max 5MB)."); return; }
     var ticketId = isDetails ? el.getAttribute("data-id") : (rejectPrompt ? rejectPrompt.ticketId : null);
     if (!ticketId) return;
     var reader = new FileReader();
