@@ -3597,7 +3597,11 @@
           '<td><input type="text" class="field-input" style="padding:6px 8px;font-size:13px" data-role="roster-edit-role" value="' + escapeHtml(d.role) + '"></td>' +
           '<td><input type="email" class="field-input" style="padding:6px 8px;font-size:13px" data-role="roster-edit-email" placeholder="name@company.com" value="' + escapeHtml(d.email) + '"></td>' +
           '<td style="text-align:center"><input type="checkbox" class="roster-admin-check" style="cursor:pointer" data-action="roster-edit-admin" data-user="' + u.id + '"' + (d.isAdmin ? " checked" : "") + "></td>" +
-          '<td style="text-align:center"><input type="checkbox" class="roster-admin-check" style="cursor:pointer" data-action="roster-edit-can-delete" data-user="' + u.id + '"' + (d.canDeleteTickets ? " checked" : "") + "></td>" +
+          // A Superadmin already has delete access regardless of this flag
+          // (see hasDeleteAccess()) — shown checked-and-disabled rather than
+          // independently toggleable while Admin is on, so the control never
+          // implies unchecking it would take delete access away.
+          '<td style="text-align:center"><input type="checkbox" class="roster-admin-check" style="cursor:' + (d.isAdmin ? "not-allowed" : "pointer") + '" data-action="roster-edit-can-delete" data-user="' + u.id + '"' + (d.isAdmin ? " disabled" : "") + (d.isAdmin || d.canDeleteTickets ? " checked" : "") + ' title="' + (d.isAdmin ? "Superadmins can already delete tickets" : "") + '"></td>' +
           '<td style="text-align:right;white-space:nowrap">' +
           '<button type="button" class="icon-btn" style="height:26px;width:26px;border:none;display:inline-flex" data-action="roster-save" data-user="' + u.id + '" title="Save">' + I("checkCircle", 14) + "</button>" +
           '<button type="button" class="icon-btn" style="height:26px;width:26px;border:none;display:inline-flex" data-action="roster-cancel" title="Cancel">' + I("x", 14) + "</button>" +
@@ -3609,7 +3613,7 @@
         '<td><span class="role-pill">' + escapeHtml(u.role) + "</span></td>" +
         '<td><span class="mono" style="font-size:12px;color:var(--text-dim)">' + escapeHtml(u.email) + "</span></td>" +
         '<td style="text-align:center"><input type="checkbox" class="roster-admin-check" disabled' + (u.isAdmin ? " checked" : "") + ' title="Click Edit to change"></td>' +
-        '<td style="text-align:center"><input type="checkbox" class="roster-admin-check" disabled' + (u.canDeleteTickets ? " checked" : "") + ' title="Click Edit to change"></td>' +
+        '<td style="text-align:center"><input type="checkbox" class="roster-admin-check" disabled' + (u.isAdmin || u.canDeleteTickets ? " checked" : "") + ' title="' + (u.isAdmin ? "Superadmins can already delete tickets" : "Click Edit to change") + '"></td>' +
         '<td style="text-align:right">' +
         rowActionMenuHtml("roster:" + u.id, "roster-edit-start", ' data-user="' + u.id + '"', "roster-delete", ' data-user="' + u.id + '"') +
         "</td></tr>";
@@ -3624,7 +3628,7 @@
         '<td><input type="text" class="field-input" style="padding:6px 8px;font-size:13px" data-role="roster-add-role" placeholder="e.g. L1" value="' + escapeHtml(ad.role) + '"></td>' +
         '<td><input type="email" class="field-input" style="padding:6px 8px;font-size:13px" data-role="roster-add-email" placeholder="name@company.com" value="' + escapeHtml(ad.email) + '"></td>' +
         '<td style="text-align:center"><input type="checkbox" class="roster-admin-check" style="cursor:pointer" data-action="roster-add-admin"' + (ad.isAdmin ? " checked" : "") + "></td>" +
-        '<td style="text-align:center"><input type="checkbox" class="roster-admin-check" style="cursor:pointer" data-action="roster-add-can-delete"' + (ad.canDeleteTickets ? " checked" : "") + "></td>" +
+        '<td style="text-align:center"><input type="checkbox" class="roster-admin-check" style="cursor:' + (ad.isAdmin ? "not-allowed" : "pointer") + '" data-action="roster-add-can-delete"' + (ad.isAdmin ? " disabled" : "") + (ad.isAdmin || ad.canDeleteTickets ? " checked" : "") + ' title="' + (ad.isAdmin ? "Superadmins can already delete tickets" : "") + '"></td>' +
         '<td style="text-align:right;white-space:nowrap">' +
         '<button type="button" class="icon-btn" style="height:26px;width:26px;border:none;display:inline-flex" data-action="roster-add-save" title="Add member">' + I("checkCircle", 14) + "</button>" +
         '<button type="button" class="icon-btn" style="height:26px;width:26px;border:none;display:inline-flex" data-action="roster-add-cancel" title="Cancel">' + I("x", 14) + "</button>" +
