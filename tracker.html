@@ -284,6 +284,11 @@
   :root[data-theme="light"] input.board-sort-select[type="date"] { color-scheme: light; }
   .overdue-toggle { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-dim); cursor: pointer; user-select: none; }
   .overdue-toggle input { accent-color: var(--accent); cursor: pointer; }
+  /* Assignee picker: a plain checkbox per person instead of a native
+     multi-select — ctrl/cmd-click (or dragging across rows) to pick more
+     than one is exactly the interaction people kept getting stuck on. */
+  .assignee-checklist { border-radius: var(--radius-sm); background: var(--panel); border: 1px solid var(--border); padding: 8px 10px; max-height: 168px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+  .assignee-checklist .overdue-toggle { font-size: 13px; color: var(--text); }
   .btn-primary {
     border-radius: var(--radius-sm); background: var(--accent); color: #fff8f5; border: none;
     font-size: 13px; font-weight: 700; padding: 8px 16px; transition: background .15s;
@@ -1495,7 +1500,7 @@
     // SLA_NOT_STARTED) — a seed ticket created unassigned gets the sentinel
     // instead of a countdown that was already running before the page even
     // loaded.
-    var seedIsUnassigned = !overrides.assignee || overrides.assignee === UNASSIGNED;
+    var seedIsUnassigned = !overrides.assignees || overrides.assignees.length === 0;
     var base = {
       history: [{ id: uid(), action: "Created", time: created, note: "Ticket opened as " + openedStatus }],
       comments: [],
@@ -1512,9 +1517,10 @@
       slaDate: seedIsUnassigned ? SLA_NOT_STARTED : addHours(created, priorityConfig.hours)
     };
     for (var k in overrides) base[k] = overrides[k];
-    // Assignee is optional by design (blank = Unassigned) — normalize
-    // null/undefined to "" so every downstream check (`!assignee`) is uniform.
-    base.assignee = base.assignee || "";
+    // Assignees is optional by design (empty array = Unassigned) — normalize
+    // null/undefined to [] so every downstream check (`!assignees.length`)
+    // is uniform.
+    base.assignees = base.assignees || [];
     base.status = normalizeStatus(base.status);
     return base;
   }
@@ -1633,18 +1639,18 @@
   // SEED DATA
   // =====================================================================
   var INITIAL_TICKETS = [
-    makeTicket({ id: "SOC-1001", team: "SOC", title: "Tune false-positive alerts on brute-force detection rule", details: "Auth-layer SIEM rule is firing 40+ false positives/hr from the VPN gateway subnet. Needs threshold tuning before next shift.", priority: "Critical", category: "Rule Finetuning", status: "In Progress", requestedBy: "IT Infrastructure", assignee: "u3", createdAt: hoursAgo(1.1) }),
-    makeTicket({ id: "SOC-1002", team: "SOC", title: "Update phishing response playbook v3", details: "Incorporate the new mail-gateway quarantine steps and the updated escalation contacts into the phishing playbook.", priority: "Medium", category: "Playbook/Automation", status: "New", requestedBy: "Andre Val Consorte", assignee: "u1", createdAt: hoursAgo(2) }),
-    makeTicket({ id: "SOC-1003", team: "SOC", title: "Investigate anomalous outbound traffic from DB server", details: "DB-PROD-04 showed a spike in outbound traffic to an unrecognized ASN overnight. Awaiting firewall export from network team.", priority: "High", category: "Feed Configuration", status: "In Progress", requestedBy: "Rhea Lorenzana", assignee: "u2", createdAt: hoursAgo(1.5), isPaused: true, pausedAt: hoursAgo(0.4), pausedHistoryNote: "Waiting on firewall export from Network team" }),
-    makeTicket({ id: "SOC-1004", team: "SOC", title: "Night shift handover summary review", details: "Review and archive last night's shift handover notes before the weekly report is generated.", priority: "Low", category: "Shift Handover / Administrative", status: "New", requestedBy: "Andre Val Consorte", assignee: UNASSIGNED, createdAt: hoursAgo(3) }),
-    makeTicket({ id: "SOC-1005", team: "SOC", title: "Peer review: updated endpoint isolation runbook", details: "Runbook changes for automated endpoint isolation are ready for a second pair of eyes before publishing.", priority: "Medium", category: "Documentation", status: "In Progress", requestedBy: "Gabriel Jethro Anunciacion", assignee: "u3", createdAt: hoursAgo(4) }),
-    makeTicket({ id: "SOC-1006", team: "SOC", title: "Escalate unresolved lateral movement alert", details: "EDR flagged lateral movement between two workstations overnight. Alert has sat untriaged well past the Critical SLA window and needs immediate escalation.", priority: "Critical", category: "Rule Finetuning", status: "In Progress", requestedBy: "Alvin Jarek Gonzales", assignee: "u2", createdAt: hoursAgo(3.5) }),
-    makeTicket({ id: "TI-2001", team: "TI", title: "Analyze new Emotet variant sample", details: "Sample submitted by SOC after sandbox detonation flagged unusual C2 beaconing. Full static + dynamic analysis needed.", priority: "Critical", category: "Threat Hunt", status: "In Progress", requestedBy: "Andre Val Consorte", assignee: "u7", createdAt: hoursAgo(1.2) }),
-    makeTicket({ id: "TI-2002", team: "TI", title: "Weekly threat briefing deck for leadership", details: "Compile this week's notable CVEs, active campaigns, and sector-relevant threat actor activity for Friday's briefing.", priority: "Medium", category: "Threat Briefing / Advisory", status: "New", requestedBy: "CISO Office", assignee: "u8", createdAt: hoursAgo(2.5) }),
-    makeTicket({ id: "TI-2003", team: "TI", title: "IoC feed integration — MISP sync issue", details: "MISP feed sync has been failing silently since last night's maintenance window. Needs API credential check.", priority: "High", category: "IoC Enrichment & Feeds", status: "In Progress", requestedBy: "Rod Valdez", assignee: "u6", createdAt: hoursAgo(2), isPaused: true, pausedAt: hoursAgo(0.6), pausedHistoryNote: "Waiting on new API credentials from vendor" }),
-    makeTicket({ id: "TI-2004", team: "TI", title: "Draft intelligence report: APT29 TTPs", details: "Compile a report on APT29's latest observed TTPs for internal distribution to SOC.", priority: "Low", category: "Internal Security", status: "New", requestedBy: "Jeshrine Zoe Nogar", assignee: "u9", createdAt: hoursAgo(5) }),
-    makeTicket({ id: "TI-2005", team: "TI", title: "Peer review: Q3 IoC feed source audit", details: "Audit of current IoC feed sources is complete and ready for peer sign-off before archiving.", priority: "Medium", category: "Queries", status: "Resolved", requestedBy: "Miguel Luayon", assignee: "u7", createdAt: hoursAgo(6), dateTimeResolved: hoursAgo(1) }),
-    makeTicket({ id: "TI-2006", team: "TI", title: "Triage suspected C2 beacon reported by SOC", details: "SOC flagged a suspicious outbound beaconing pattern for review. Still awaiting Threat Hunt triage — well past the Critical SLA window.", priority: "Critical", category: "Threat Hunt", status: "New", requestedBy: "Andre Val Consorte", assignee: "u6", createdAt: hoursAgo(2.75) })
+    makeTicket({ id: "SOC-1001", team: "SOC", title: "Tune false-positive alerts on brute-force detection rule", details: "Auth-layer SIEM rule is firing 40+ false positives/hr from the VPN gateway subnet. Needs threshold tuning before next shift.", priority: "Critical", category: "Rule Finetuning", status: "In Progress", requestedBy: "IT Infrastructure", assignees: ["u3"], createdAt: hoursAgo(1.1) }),
+    makeTicket({ id: "SOC-1002", team: "SOC", title: "Update phishing response playbook v3", details: "Incorporate the new mail-gateway quarantine steps and the updated escalation contacts into the phishing playbook.", priority: "Medium", category: "Playbook/Automation", status: "New", requestedBy: "Andre Val Consorte", assignees: ["u1"], createdAt: hoursAgo(2) }),
+    makeTicket({ id: "SOC-1003", team: "SOC", title: "Investigate anomalous outbound traffic from DB server", details: "DB-PROD-04 showed a spike in outbound traffic to an unrecognized ASN overnight. Awaiting firewall export from network team.", priority: "High", category: "Feed Configuration", status: "In Progress", requestedBy: "Rhea Lorenzana", assignees: ["u2"], createdAt: hoursAgo(1.5), isPaused: true, pausedAt: hoursAgo(0.4), pausedHistoryNote: "Waiting on firewall export from Network team" }),
+    makeTicket({ id: "SOC-1004", team: "SOC", title: "Night shift handover summary review", details: "Review and archive last night's shift handover notes before the weekly report is generated.", priority: "Low", category: "Shift Handover / Administrative", status: "New", requestedBy: "Andre Val Consorte", assignees: [], createdAt: hoursAgo(3) }),
+    makeTicket({ id: "SOC-1005", team: "SOC", title: "Peer review: updated endpoint isolation runbook", details: "Runbook changes for automated endpoint isolation are ready for a second pair of eyes before publishing.", priority: "Medium", category: "Documentation", status: "In Progress", requestedBy: "Gabriel Jethro Anunciacion", assignees: ["u3"], createdAt: hoursAgo(4) }),
+    makeTicket({ id: "SOC-1006", team: "SOC", title: "Escalate unresolved lateral movement alert", details: "EDR flagged lateral movement between two workstations overnight. Alert has sat untriaged well past the Critical SLA window and needs immediate escalation.", priority: "Critical", category: "Rule Finetuning", status: "In Progress", requestedBy: "Alvin Jarek Gonzales", assignees: ["u2"], createdAt: hoursAgo(3.5) }),
+    makeTicket({ id: "TI-2001", team: "TI", title: "Analyze new Emotet variant sample", details: "Sample submitted by SOC after sandbox detonation flagged unusual C2 beaconing. Full static + dynamic analysis needed.", priority: "Critical", category: "Threat Hunt", status: "In Progress", requestedBy: "Andre Val Consorte", assignees: ["u7"], createdAt: hoursAgo(1.2) }),
+    makeTicket({ id: "TI-2002", team: "TI", title: "Weekly threat briefing deck for leadership", details: "Compile this week's notable CVEs, active campaigns, and sector-relevant threat actor activity for Friday's briefing.", priority: "Medium", category: "Threat Briefing / Advisory", status: "New", requestedBy: "CISO Office", assignees: ["u8"], createdAt: hoursAgo(2.5) }),
+    makeTicket({ id: "TI-2003", team: "TI", title: "IoC feed integration — MISP sync issue", details: "MISP feed sync has been failing silently since last night's maintenance window. Needs API credential check.", priority: "High", category: "IoC Enrichment & Feeds", status: "In Progress", requestedBy: "Rod Valdez", assignees: ["u6"], createdAt: hoursAgo(2), isPaused: true, pausedAt: hoursAgo(0.6), pausedHistoryNote: "Waiting on new API credentials from vendor" }),
+    makeTicket({ id: "TI-2004", team: "TI", title: "Draft intelligence report: APT29 TTPs", details: "Compile a report on APT29's latest observed TTPs for internal distribution to SOC.", priority: "Low", category: "Internal Security", status: "New", requestedBy: "Jeshrine Zoe Nogar", assignees: ["u9"], createdAt: hoursAgo(5) }),
+    makeTicket({ id: "TI-2005", team: "TI", title: "Peer review: Q3 IoC feed source audit", details: "Audit of current IoC feed sources is complete and ready for peer sign-off before archiving.", priority: "Medium", category: "Queries", status: "Resolved", requestedBy: "Miguel Luayon", assignees: ["u7"], createdAt: hoursAgo(6), dateTimeResolved: hoursAgo(1) }),
+    makeTicket({ id: "TI-2006", team: "TI", title: "Triage suspected C2 beacon reported by SOC", details: "SOC flagged a suspicious outbound beaconing pattern for review. Still awaiting Threat Hunt triage — well past the Critical SLA window.", priority: "Critical", category: "Threat Hunt", status: "New", requestedBy: "Andre Val Consorte", assignees: ["u6"], createdAt: hoursAgo(2.75) })
   ];
   INITIAL_TICKETS.forEach(function (t) {
     if (t.pausedAt) t.history.push({ id: uid(), action: "Paused", time: t.pausedAt, note: t.pausedHistoryNote || "Paused" });
@@ -1704,21 +1710,31 @@
   // db.replaceAllTickets() and its "created" vs "statusChanged" events,
   // which is what actually fires the assignment/status-change emails).
   var lastSyncedTicketsById = {};
+  // Returns a promise resolving to true once the server has actually
+  // confirmed the write (or true immediately if there was nothing to sync) —
+  // false if the PUT failed. Every existing bare `persistTickets();` call
+  // site ignores the return value (fire-and-forget, same as before), so this
+  // is purely additive: it lets a caller that DOES care — like Save Changes
+  // below — wait for and show real confirmation instead of optimistically
+  // assuming the write landed before the user might navigate away or
+  // refresh, which is exactly how an edit could silently vanish if the
+  // request hadn't actually finished yet.
   function persistTickets() {
-    if (ticketsLoadFailed) return true; // never write back an unconfirmed fallback ticket list — see loadTickets()'s catch handler
+    if (ticketsLoadFailed) return Promise.resolve(true); // never write back an unconfirmed fallback ticket list — see loadTickets()'s catch handler
     var dirty = state.tickets.some(function (t) { return lastSyncedTicketsById[t.id] !== JSON.stringify(t); });
-    if (!dirty) return true; // nothing changed since the last successful sync — skip the network round-trip
-    fetch(API_BASE_URL + "/tickets", {
+    if (!dirty) return Promise.resolve(true); // nothing changed since the last successful sync — skip the network round-trip
+    return fetch(API_BASE_URL + "/tickets", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(state.tickets)
     }).then(function (res) {
       if (!res.ok) throw new Error("HTTP " + res.status);
       state.tickets.forEach(function (t) { lastSyncedTicketsById[t.id] = JSON.stringify(t); });
+      return true;
     }).catch(function (err) {
       console.error("Could not persist tickets to server:", err);
+      return false;
     });
-    return true; // optimistic, same as the old synchronous "assume the write worked" localStorage call
   }
 
   // Every team in TEAMS plus LEADERSHIP — was three separate hardcoded
@@ -1876,12 +1892,24 @@
   function findTicket(id) {
     return state.tickets.filter(function (t) { return t.id === id; })[0] || null;
   }
+  // Order-insensitive array-of-ids equality — used everywhere an assignees
+  // list needs comparing against another (dirty-checks, SLA start/freeze
+  // triggers), since picking the same people back in a different click order
+  // must never register as "changed."
+  function sameIdSet(a, b) {
+    a = a || []; b = b || [];
+    if (a.length !== b.length) return false;
+    var sa = a.slice().sort();
+    var sb = b.slice().sort();
+    for (var i = 0; i < sa.length; i++) if (sa[i] !== sb[i]) return false;
+    return true;
+  }
   function updateTicket(id, patch) {
     state.tickets = state.tickets.map(function (t) {
       if (t.id !== id) return t;
       var next = {};
       for (var k in t) next[k] = t[k];
-      // Single chokepoint for every assignee change made through the UI
+      // Single chokepoint for every assignees change made through the UI
       // (Save Changes' assignee draft is the only place this happens today,
       // but this covers any future one too) — starts the SLA clock the
       // moment a ticket gets its first real assignee. Only fires while
@@ -1891,19 +1919,20 @@
       // /api/tickets, which handles ticket creation and any direct API
       // client — this is what the app's own bulk-sync (persistTickets())
       // path actually goes through.
-      if (patch.assignee != null && patch.assignee && !t.assignee && slaNotStarted(t)) {
+      var tAssignees = t.assignees || [];
+      if (patch.assignees != null && patch.assignees.length && !tAssignees.length && slaNotStarted(t)) {
         next.slaDate = Date.now() + (t.priorityConfig ? t.priorityConfig.hours : 8) * 3600 * 1000;
       }
       // Once the clock has actually started (not the sentinel above), losing
-      // the assignee again freezes it — same idea as Pause, but automatic.
+      // every assignee again freezes it — same idea as Pause, but automatic.
       // Reassigning later credits the frozen duration back into slaDate,
       // same as Resume does. Tracked in unassignedSince, a separate field
       // from isPaused, so an analyst's own deliberate pause is never
       // confused with (or cleared by) this automatic one. Mirrors the
       // equivalent server-side logic in PATCH /api/tickets/:id.
-      var wasReallyAssigned = !!t.assignee && t.assignee !== UNASSIGNED;
-      var patchUnassigns = patch.assignee != null && (!patch.assignee || patch.assignee === UNASSIGNED);
-      var patchAssigns = patch.assignee != null && patch.assignee && patch.assignee !== UNASSIGNED;
+      var wasReallyAssigned = tAssignees.length > 0;
+      var patchUnassigns = patch.assignees != null && patch.assignees.length === 0;
+      var patchAssigns = patch.assignees != null && patch.assignees.length > 0;
       if (patchUnassigns && wasReallyAssigned && !slaNotStarted(t)) {
         next.unassignedSince = Date.now();
       }
@@ -1937,16 +1966,53 @@
     size = size || "sm";
     return '<div class="avatar ' + size + '" title="' + escapeHtml(name) + '">' + escapeHtml(initials(name)) + "</div>";
   }
-  function assigneeTag(assignee, size) {
+  // Renders a ticket's assignees list. Shows the first assignee's avatar +
+  // name, plus a "+N" suffix when there's more than one — the full roster of
+  // names is always available via the title tooltip, so nothing is hidden,
+  // just kept compact enough to fit the same card/row layout a single
+  // assignee used to.
+  function assigneeTag(assignees, size) {
     size = size || "sm";
-    var isUnassigned = !assignee || assignee === UNASSIGNED;
-    if (isUnassigned) {
+    var list = (assignees || []).filter(Boolean);
+    if (list.length === 0) {
       var dim = size === "sm" ? "24px" : "36px";
       return '<div class="assignee"><div class="avatar-unassigned" style="width:' + dim + ";height:" + dim + ';border-radius:50%;font-size:' + (size === "sm" ? "11px" : "14px") + '">?</div>' +
         '<span class="unassigned-label">Unassigned</span></div>';
     }
-    var name = userName(assignee);
-    return '<div class="assignee">' + avatarHtml(name, size) + '<span class="assignee-name' + (size === "md" ? " md" : "") + '">' + escapeHtml(name) + "</span></div>";
+    var names = list.map(userName);
+    var label = escapeHtml(names[0]) + (names.length > 1 ? " +" + (names.length - 1) : "");
+    return '<div class="assignee" title="' + escapeHtml(names.join(", ")) + '">' + avatarHtml(names[0], size) + '<span class="assignee-name' + (size === "md" ? " md" : "") + '">' + label + "</span></div>";
+  }
+
+  // The Assignees field in Create Ticket / the ticket detail view: a single
+  // click-to-expand summary row (never the whole team roster dumped on
+  // screen at once), same collapsed-until-clicked idea as toggle-row-menu.
+  // pickerKey is "create" for the create form, or a ticket id — whichever
+  // one matches openAssigneeDropdownFor is the one currently expanded.
+  // Checking a box doesn't close it — multiple people need picking without
+  // re-opening it each time — only clicking the summary again or clicking
+  // elsewhere does (see the outside-click cleanup in onClick()).
+  function assigneePickerHtml(pickerKey, users, selectedIds) {
+    var names = users.filter(function (u) { return selectedIds.indexOf(u.id) !== -1; }).map(function (u) { return u.name; });
+    var summary = names.length ? names.join(", ") : "Unassigned — click to assign";
+    var isOpen = openAssigneeDropdownFor === pickerKey;
+    // min-width:0 on the button AND the text span is load-bearing, not
+    // decorative — both are flex items, which default to min-width:auto
+    // (i.e. "never shrink below your content's own width"). Without it, a
+    // long comma-joined name list ignores its own overflow:ellipsis and
+    // instead forces the button — and the grid cell it sits in — wider than
+    // the modal's 2-column layout, squeezing "Requested By" next to it into
+    // a sliver (the exact wrapping/clipping bug this fixes).
+    var trigger = '<button type="button" class="field-input" style="width:100%;min-width:0;overflow:hidden;text-align:left;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:8px" data-action="toggle-assignee-picker" data-picker="' + escapeHtml(pickerKey) + '">' +
+      '<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' + (names.length ? "" : "color:var(--text-faint)") + '">' + escapeHtml(summary) + "</span>" +
+      '<span style="flex-shrink:0;color:var(--text-faint);display:inline-flex;transition:transform .15s;transform:rotate(' + (isOpen ? "180deg" : "0deg") + ')">' + I("chevronDown", 14) + "</span>" +
+      "</button>";
+    if (!isOpen) return trigger;
+    var rows = users.map(function (u) {
+      var checked = selectedIds.indexOf(u.id) !== -1;
+      return '<label class="mention-option"><input type="checkbox" data-action="assignee-toggle" data-picker="' + escapeHtml(pickerKey) + '" data-user="' + u.id + '"' + (checked ? " checked" : "") + ">" + escapeHtml(u.name) + " (" + escapeHtml(u.role) + ")</label>";
+    }).join("");
+    return trigger + '<div class="assignee-checklist" style="margin-top:6px">' + rows + "</div>";
   }
 
   function ticketCardHtml(t) {
@@ -2004,7 +2070,7 @@
       '<div class="ticket-top"><span class="ticket-id mono">' + escapeHtml(t.id) + "</span>" + priorityBadge(t.priority, cfg) + "</div>" +
       '<p class="ticket-title">' + escapeHtml(t.title) + "</p>" +
       '<div class="ticket-badges">' + badges + "</div>" +
-      '<div class="ticket-footer">' + assigneeTag(t.assignee) + footer + "</div>" +
+      '<div class="ticket-footer">' + assigneeTag(t.assignees) + footer + "</div>" +
       "</div></button>";
   }
 
@@ -2059,7 +2125,7 @@
       '<p class="ticket-tooltip-details">' + linkifyText(t.details) + "</p>" +
       '<div class="ticket-tooltip-meta">' +
       '<div class="ticket-tooltip-meta-item"><span class="ticket-tooltip-meta-label">Requested By</span><span class="ticket-tooltip-meta-value">' + escapeHtml(t.requestedBy) + "</span></div>" +
-      '<div class="ticket-tooltip-meta-item"><span class="ticket-tooltip-meta-label">Assignee</span><span class="ticket-tooltip-meta-value">' + escapeHtml(t.assignee ? userName(t.assignee) : "Unassigned") + "</span></div>" +
+      '<div class="ticket-tooltip-meta-item"><span class="ticket-tooltip-meta-label">Assignee' + ((t.assignees || []).length > 1 ? "s" : "") + '</span><span class="ticket-tooltip-meta-value">' + escapeHtml((t.assignees || []).length ? t.assignees.map(userName).join(", ") : "Unassigned") + "</span></div>" +
       '<div class="ticket-tooltip-meta-item"><span class="ticket-tooltip-meta-label">Status</span><span class="ticket-tooltip-meta-value">' + escapeHtml(t.status) + (t.isPaused ? " (Paused)" : "") + "</span></div>" +
       '<div class="ticket-tooltip-meta-item"><span class="ticket-tooltip-meta-label">SLA</span><span class="ticket-tooltip-meta-value">' + escapeHtml(slaText) + "</span></div>" +
       "</div>";
@@ -2223,7 +2289,7 @@
     var actions = "";
     if (state.view === "board") {
       var odTeam = overdueCounts[state.team];
-      var myTicketCount = state.tickets.filter(function (t) { return t.team === state.team && t.assignee === state.currentUserId; }).length;
+      var myTicketCount = state.tickets.filter(function (t) { return t.team === state.team && (t.assignees || []).indexOf(state.currentUserId) !== -1; }).length;
       // "Only My Tickets" and the Assignee dropdown share one underlying
       // filter (effectively assigneeFilter) so they can never disagree —
       // checking the box is equivalent to picking the current user in the
@@ -2301,11 +2367,11 @@
     var tickets = state.tickets.filter(function (t) { return t.team === state.team; });
     if (state.showOverdueOnly) tickets = tickets.filter(function (t) { return isOverdue(t, state.now); });
     if (state.onlyMyTickets) {
-      tickets = tickets.filter(function (t) { return t.assignee === state.currentUserId; });
+      tickets = tickets.filter(function (t) { return (t.assignees || []).indexOf(state.currentUserId) !== -1; });
     } else if (state.assigneeFilter === "unassigned") {
-      tickets = tickets.filter(function (t) { return !t.assignee || t.assignee === UNASSIGNED; });
+      tickets = tickets.filter(function (t) { return !t.assignees || t.assignees.length === 0; });
     } else if (state.assigneeFilter) {
-      tickets = tickets.filter(function (t) { return t.assignee === state.assigneeFilter; });
+      tickets = tickets.filter(function (t) { return (t.assignees || []).indexOf(state.assigneeFilter) !== -1; });
     }
     if (state.clientFilter) {
       tickets = tickets.filter(function (t) { return (t.client || DEFAULT_CLIENT) === state.clientFilter; });
@@ -2673,10 +2739,15 @@
     // how fast" rather than just the team-wide number.
     var resolutionByAnalystMap = {};
     resolvedWithTimes.forEach(function (t) {
-      var key = t.assignee && t.assignee !== UNASSIGNED ? t.assignee : "unassigned";
+      // A multi-assignee ticket counts once toward EACH of its assignees —
+      // every analyst who worked it gets credit for the resolution, not just
+      // whichever one happens to be listed first.
+      var keys = (t.assignees && t.assignees.length) ? t.assignees : ["unassigned"];
+      keys.forEach(function (key) {
       if (!resolutionByAnalystMap[key]) resolutionByAnalystMap[key] = { totalMs: 0, count: 0 };
       resolutionByAnalystMap[key].totalMs += (t.dateTimeResolved - t.createdAt);
       resolutionByAnalystMap[key].count += 1;
+      });
     });
     var resolutionByAnalystEntries = Object.keys(resolutionByAnalystMap).map(function (key) {
       var d = resolutionByAnalystMap[key];
@@ -2723,8 +2794,12 @@
     // not lifetime ticket volume, which is what the category chart is for.
     var workloadMap = {};
     active.forEach(function (t) {
-      var key = t.assignee && t.assignee !== UNASSIGNED ? t.assignee : "unassigned";
-      workloadMap[key] = (workloadMap[key] || 0) + 1;
+      // Same fan-out as resolutionByAnalystMap above — a ticket with
+      // multiple assignees counts as active workload for every one of them.
+      var keys = (t.assignees && t.assignees.length) ? t.assignees : ["unassigned"];
+      keys.forEach(function (key) {
+        workloadMap[key] = (workloadMap[key] || 0) + 1;
+      });
     });
     var workloadEntries = Object.keys(workloadMap).map(function (key) {
       return { label: key === "unassigned" ? "Unassigned" : userName(key), count: workloadMap[key], unassigned: key === "unassigned" };
@@ -2783,7 +2858,7 @@
         category: t.category,
         status: t.status,
         slaStatus: slaStatus,
-        assignee: t.assignee ? userName(t.assignee) : "Unassigned",
+        assignee: (t.assignees || []).length ? t.assignees.map(userName).join(", ") : "Unassigned",
         requestedBy: t.requestedBy,
         createdAt: t.createdAt
       };
@@ -2823,7 +2898,7 @@
   // RENDER — TICKET MODAL
   // =====================================================================
   var draftDetailsCache = {}; // ticketId -> draft text, survives re-render but not ticket switch
-  var draftAssigneeCache = {}; // ticketId -> draft assignee id ("" = Unassigned), same lifecycle as details draft
+  var draftAssigneeCache = {}; // ticketId -> draft assignees array ([] = Unassigned), same lifecycle as details draft
   var draftCategoryCache = {}; // ticketId -> draft category string, same lifecycle as the assignee draft above
   var draftClientCache = {}; // ticketId -> draft client string, same lifecycle as the category draft above
   var draftAgencyCache = {}; // ticketId -> draft agency string ("" = General/No specific agency), committed value
@@ -2869,6 +2944,11 @@
   // Only one at a time; opening a new one implicitly closes whichever was
   // already open (see toggle-row-menu).
   var openRowMenu = null;
+  // Same one-at-a-time-key pattern as openRowMenu, for the Assignees
+  // checklist in Create Ticket / the ticket detail view — "create" for the
+  // create form, or a ticket id. Collapsed by default so the form doesn't
+  // dump the whole team roster on screen; click the summary to expand it.
+  var openAssigneeDropdownFor = null;
   // Reusable single-trigger action menu — one "⋮" button that opens a
   // small Edit/Delete dropdown, instead of two always-visible icon
   // buttons per row. menuKey must be unique across the whole page (e.g.
@@ -2953,11 +3033,13 @@
     var detailsLabel = t.team === "TI" ? "Hunt Notes" : "Details";
     var draft = draftDetailsCache[t.id] != null ? draftDetailsCache[t.id] : t.details;
     var detailsDirty = draft !== t.details;
-    // Assignee is edited the same way as Details/Hunt Notes: a draft value
-    // held until "Save Changes" is clicked. "" always means Unassigned, for
-    // both the saved ticket and the draft, so the two compare cleanly.
-    var assigneeDraft = draftAssigneeCache[t.id] != null ? draftAssigneeCache[t.id] : (t.assignee || "");
-    var assigneeDirty = assigneeDraft !== (t.assignee || "");
+    // Assignees is edited the same way as Details/Hunt Notes: a draft value
+    // (now an array — a ticket can have multiple assignees) held until "Save
+    // Changes" is clicked. [] always means Unassigned, for both the saved
+    // ticket and the draft, so the two compare cleanly (order-insensitively,
+    // via sameIdSet).
+    var assigneeDraft = draftAssigneeCache[t.id] != null ? draftAssigneeCache[t.id] : (t.assignees || []);
+    var assigneeDirty = !sameIdSet(assigneeDraft, t.assignees || []);
     // Category is edited the same draft-until-Save-Changes way as Assignee.
     // If the saved category was since renamed/deleted from CATEGORIES (an
     // admin edit in Manage Categories), it's prepended as its own option so
@@ -3056,13 +3138,6 @@
 
     var statusOptions = STATUSES.map(function (s) { return '<option value="' + s + '"' + (s === statusDraft ? " selected" : "") + ">" + s + "</option>"; }).join("");
 
-    // Always a real <select>, never a static tag — "Unassigned" is just its
-    // blank default option, so an unassigned ticket is exactly as editable
-    // as an assigned one.
-    var assigneeOptionsHtml = '<option value=""' + (assigneeDraft === "" ? " selected" : "") + '>Unassigned</option>' +
-      usersForTeam(t.team).map(function (u) {
-        return '<option value="' + u.id + '"' + (u.id === assigneeDraft ? " selected" : "") + ">" + escapeHtml(u.name) + " (" + escapeHtml(u.role) + ")</option>";
-      }).join("");
 
     var categoryListForTicket = CATEGORIES[t.team].indexOf(categoryDraft) === -1
       ? [categoryDraft].concat(CATEGORIES[t.team])
@@ -3156,7 +3231,7 @@
       '<div data-role="details-links" data-id="' + t.id + '">' + detectedLinksHtml(draft) + "</div>" +
       "</div>" +
       '<div class="meta-grid">' +
-      '<div><p class="section-label">Assignee</p><select class="field-input" data-action="assignee-select" data-id="' + t.id + '">' + assigneeOptionsHtml + "</select></div>" +
+      '<div style="min-width:0"><p class="section-label">Assignees</p>' + assigneePickerHtml(t.id, usersForTeam(t.team), assigneeDraft) + "</div>" +
       '<div><p class="section-label">Requested By</p><p class="meta-row-user">' + I("user", 13) + escapeHtml(t.requestedBy) + "</p></div>" +
       '<div><p class="section-label">Created</p><p class="mono value" style="font-size:12px">' + formatClock(t.createdAt) + "</p></div>" +
       '<div><p class="section-label">Status</p><select class="field-input" data-action="change-status" data-id="' + t.id + '">' + statusOptions + "</select></div>" +
@@ -3203,7 +3278,7 @@
       priority: "Medium",
       category: CATEGORIES[defaultTeam][0] || "", // empty string, not undefined, if every category for this team was deleted — POST /api/tickets falls back to "Uncategorized" server-side either way
       requestedBy: userName(state.currentUserId),
-      assignee: "",
+      assignees: [],
       client: DEFAULT_CLIENT,
       agency: "", // "" = General/No specific agency; only meaningful when client === "NSOC"
       agencyQuery: "" // raw text currently typed in the Agency combobox input
@@ -3218,9 +3293,6 @@
     }).join("");
     var categoryOptions = CATEGORIES[f.team].map(function (c) {
       return '<option value="' + escapeHtml(c) + '"' + (c === f.category ? " selected" : "") + ">" + escapeHtml(c) + "</option>";
-    }).join("");
-    var assigneeOptions = '<option value="">Unassigned</option>' + usersForTeam(f.team).map(function (u) {
-      return '<option value="' + u.id + '"' + (u.id === f.assignee ? " selected" : "") + ">" + escapeHtml(u.name) + " (" + escapeHtml(u.role) + ")</option>";
     }).join("");
     var clientOptions = CLIENTS.map(function (c) {
       return '<option value="' + escapeHtml(c) + '"' + (c === f.client ? " selected" : "") + ">" + escapeHtml(c) + "</option>";
@@ -3247,7 +3319,7 @@
       "</div>" +
       "</div>" +
       '<div class="form-grid-2">' +
-      '<div><p class="section-label">Assignee</p><select class="field-input" data-action="create-set-assignee">' + assigneeOptions + "</select></div>" +
+      '<div style="min-width:0"><p class="section-label">Assignees</p>' + assigneePickerHtml("create", usersForTeam(f.team), f.assignees) + "</div>" +
       '<div><p class="section-label">Requested By</p><input type="text" class="field-input" placeholder="Name or email" data-role="create-requestedby" value="' + escapeHtml(f.requestedBy) + '">' +
       '<p class="hint">Defaults to the current user&#39;s name — edit to file on someone else&#39;s behalf.</p></div>' +
       "</div>" +
@@ -4010,8 +4082,17 @@
     // instead of needing the same reset repeated in each handler.
     var closedRowMenu = false;
     if (openRowMenu && clickedAction !== "toggle-row-menu") { openRowMenu = null; closedRowMenu = true; }
+    // Same idea for the Assignees checklist — any click that isn't toggling
+    // it open/closed or checking one of its own boxes closes it, same as
+    // openRowMenu above. Checking a box must NOT close it (picking more than
+    // one person is the whole point), so that action is excluded here too.
+    var closedAssigneeDropdown = false;
+    if (openAssigneeDropdownFor && clickedAction !== "toggle-assignee-picker" && clickedAction !== "assignee-toggle") {
+      openAssigneeDropdownFor = null;
+      closedAssigneeDropdown = true;
+    }
     if (!el) {
-      if (stopBoundary) { if (closedRowMenu) render(); return; }
+      if (stopBoundary) { if (closedRowMenu || closedAssigneeDropdown) render(); return; }
       if (e.target.closest(".modal-overlay")) {
         var overlay = e.target.closest(".modal-overlay");
         if (overlay.getAttribute("data-action") === "overlay-close-ticket") { state.selectedId = null; render(); }
@@ -4020,7 +4101,7 @@
         else if (overlay.getAttribute("data-action") === "overlay-close-imgpreview") { state.imagePreviewUrl = null; render(); }
         return;
       }
-      if (closedRowMenu) render();
+      if (closedRowMenu || closedAssigneeDropdown) render();
       return;
     }
     var action = el.getAttribute("data-action");
@@ -4029,6 +4110,11 @@
     if (action === "toggle-row-menu") {
       var menuKey = el.getAttribute("data-menu-key");
       openRowMenu = openRowMenu === menuKey ? null : menuKey;
+      render(); return;
+    }
+    if (action === "toggle-assignee-picker") {
+      var assigneePickerKey = el.getAttribute("data-picker");
+      openAssigneeDropdownFor = openAssigneeDropdownFor === assigneePickerKey ? null : assigneePickerKey;
       render(); return;
     }
 
@@ -4089,7 +4175,7 @@
     }
     if (action === "settings-nav") { state.settingsPanel = el.getAttribute("data-panel"); render(); return; }
     if (action === "toggle-overdue-only") { return; } // handled in change listener
-    if (action === "open-create") { createForm = freshCreateForm(state.team); state.createOpen = true; render(); return; }
+    if (action === "open-create") { createForm = freshCreateForm(state.team); state.createOpen = true; openAssigneeDropdownFor = null; render(); return; }
     if (action === "toggle-select-mode") {
       // Defense-in-depth to match the button itself not rendering at all
       // for someone without delete access — see renderTeamTabs().
@@ -4127,7 +4213,7 @@
       });
       return;
     }
-    if (action === "open-ticket") { state.selectedId = id; state.historyExpanded = false; draftDetailsCache = {}; draftAssigneeCache = {}; draftCategoryCache = {}; draftClientCache = {}; draftAgencyCache = {}; draftAgencyQueryCache = {}; draftStatusCache = {}; commentDraftCache = { ticketId: null, text: "" }; editingCommentId = null; editingCommentDraft = null; render(); return; }
+    if (action === "open-ticket") { state.selectedId = id; state.historyExpanded = false; draftDetailsCache = {}; draftAssigneeCache = {}; draftCategoryCache = {}; draftClientCache = {}; draftAgencyCache = {}; draftAgencyQueryCache = {}; draftStatusCache = {}; commentDraftCache = { ticketId: null, text: "" }; editingCommentId = null; editingCommentDraft = null; openAssigneeDropdownFor = null; render(); return; }
     if (action === "toggle-history") { state.historyExpanded = !state.historyExpanded; render(); return; }
     if (action === "close-ticket" || action === "overlay-close-ticket") { state.selectedId = null; render(); return; }
 
@@ -4214,7 +4300,7 @@
       }
       var patch = {};
       patch.details = newDetails;
-      patch.assignee = draftAssigneeCache[id] != null ? draftAssigneeCache[id] : (t.assignee || "");
+      patch.assignees = draftAssigneeCache[id] != null ? draftAssigneeCache[id] : (t.assignees || []);
       patch.category = draftCategoryCache[id] != null ? draftCategoryCache[id] : t.category;
       patch.client = draftClientCache[id] != null ? draftClientCache[id] : (t.client || DEFAULT_CLIENT);
       patch.agency = patch.client === "NSOC" ? (draftAgencyCache[id] != null ? draftAgencyCache[id] : (t.agency || "")) : "";
@@ -4226,7 +4312,17 @@
       delete draftAgencyCache[id];
       delete draftAgencyQueryCache[id];
       delete draftStatusCache[id];
-      render(); return;
+      render();
+      // Save Changes is the one moment a person deliberately commits an edit
+      // and expects it to now be safe — unlike every other action in this
+      // file, which fires persistTickets() optimistically and moves on, this
+      // one actually waits for the server to confirm the write and says so
+      // (or says it FAILED, so a refresh right after doesn't silently throw
+      // the edit away without anyone noticing).
+      persistTickets().then(function (ok) {
+        showBackupToast(ok ? "Changes saved." : "Could not save changes — check your connection and try again before leaving this page.");
+      });
+      return;
     }
     if (action === "trigger-file") {
       var input = document.getElementById("file-input-" + id);
@@ -4584,7 +4680,7 @@
       agencyPage[agPageClientLast] = Math.max(0, Math.ceil((AGENCIES[agPageClientLast] || []).length / agencyPageSize) - 1);
       render(); return;
     }
-    if (action === "create-set-team") { createForm.team = el.getAttribute("data-team"); createForm.category = CATEGORIES[createForm.team][0] || ""; createForm.assignee = ""; render(); return; }
+    if (action === "create-set-team") { createForm.team = el.getAttribute("data-team"); createForm.category = CATEGORIES[createForm.team][0] || ""; createForm.assignees = []; render(); return; }
     if (action === "submit-create") { submitCreateTicket(); return; }
     if (action === "settings-select-team") { state.slaActiveTeam = el.getAttribute("data-team"); render(); return; }
     if (action === "save-sla") {
@@ -4663,9 +4759,9 @@
       // this to whatever teams actually exist.
       var team = TEAMS[f.team] ? f.team : "SOC";
 
-      // "" / null / undefined all mean Unassigned — normalized to "" so
-      // every downstream check (`!assignee`) behaves identically.
-      var assignee = f.assignee || "";
+      // Missing/undefined means Unassigned — normalized to [] so every
+      // downstream check (`!assignees.length`) behaves identically.
+      var assignees = f.assignees || [];
 
       // The ticket ID is assigned by the server (POST /tickets → nextTicketId()
       // against the live DB), never computed here from state.tickets. This
@@ -4687,7 +4783,7 @@
           priority: f.priority,
           category: f.category,
           requestedBy: (requestedByEl ? requestedByEl.value.trim() : "") || "Unspecified",
-          assignee: assignee,
+          assignees: assignees,
           client: f.client || DEFAULT_CLIENT,
           agency: f.client === "NSOC" ? (f.agency || "") : ""
         })
@@ -4792,15 +4888,32 @@
       render(); return;
     }
     if (action === "filter-specific-date") { state.specificDateFilter = el.value; render(); return; }
-    if (action === "assignee-select") {
-      // A <select> change is a discrete action (not per-keystroke typing),
-      // so a full render is safe here — it just re-shows the chosen value
-      // via draftAssigneeCache and updates the Save Changes button/flag.
-      draftAssigneeCache[el.getAttribute("data-id")] = el.value;
+    if (action === "assignee-toggle") {
+      // One checkbox per person — toggling one just adds/removes that single
+      // id, leaving everyone else's checked state alone. Shared between the
+      // Create Ticket form (data-picker="create") and the ticket detail view
+      // (data-picker="<ticket id>") — same picker key assigneePickerHtml()
+      // renders under. Doesn't touch openAssigneeDropdownFor, so the
+      // checklist stays open across multiple picks (see the outside-click
+      // cleanup in onClick() for how it actually closes).
+      var togglePicker = el.getAttribute("data-picker");
+      var toggleUserId = el.getAttribute("data-user");
+      var currentAssignees;
+      if (togglePicker === "create") {
+        currentAssignees = createForm.assignees.slice();
+      } else {
+        var toggleTicket = findTicket(togglePicker);
+        currentAssignees = (draftAssigneeCache[togglePicker] != null ? draftAssigneeCache[togglePicker] : (toggleTicket ? toggleTicket.assignees || [] : [])).slice();
+      }
+      var idx = currentAssignees.indexOf(toggleUserId);
+      if (el.checked && idx === -1) currentAssignees.push(toggleUserId);
+      if (!el.checked && idx !== -1) currentAssignees.splice(idx, 1);
+      if (togglePicker === "create") createForm.assignees = currentAssignees;
+      else draftAssigneeCache[togglePicker] = currentAssignees;
       render(); return;
     }
     if (action === "category-select") {
-      // Same discrete-<select> pattern as assignee-select above.
+      // Same discrete-control pattern as assignee-toggle above.
       draftCategoryCache[el.getAttribute("data-id")] = el.value;
       render(); return;
     }
@@ -4837,7 +4950,6 @@
     }
     if (action === "create-set-priority") { createForm.priority = el.value; render(); return; }
     if (action === "create-set-category") { createForm.category = el.value; render(); return; }
-    if (action === "create-set-assignee") { createForm.assignee = el.value; render(); return; }
     if (action === "create-set-client") {
       createForm.client = el.value;
       if (createForm.client !== "NSOC") { createForm.agency = ""; createForm.agencyQuery = ""; }
@@ -4975,12 +5087,12 @@
       draftDetailsCache[id] = el.value;
       var t = findTicket(id);
       var saveBtn = document.querySelector('[data-action="save-changes"][data-id="' + id + '"]');
-      var assigneeDraftNow = draftAssigneeCache[id] != null ? draftAssigneeCache[id] : (t.assignee || "");
+      var assigneeDraftNow = draftAssigneeCache[id] != null ? draftAssigneeCache[id] : (t.assignees || []);
       var categoryDraftNow = draftCategoryCache[id] != null ? draftCategoryCache[id] : t.category;
       var clientDraftNow = draftClientCache[id] != null ? draftClientCache[id] : (t.client || DEFAULT_CLIENT);
       var agencyDraftNow = draftAgencyCache[id] != null ? draftAgencyCache[id] : (t.agency || "");
       var statusDraftNow = draftStatusCache[id] != null ? draftStatusCache[id] : t.status;
-      var dirty = (el.value !== t.details) || (assigneeDraftNow !== (t.assignee || "")) || (categoryDraftNow !== t.category) ||
+      var dirty = (el.value !== t.details) || !sameIdSet(assigneeDraftNow, t.assignees || []) || (categoryDraftNow !== t.category) ||
         (clientDraftNow !== (t.client || DEFAULT_CLIENT)) || (clientDraftNow === "NSOC" && agencyDraftNow !== (t.agency || "")) ||
         (statusDraftNow !== t.status);
       var detailsValid = el.value.trim().length > 0;

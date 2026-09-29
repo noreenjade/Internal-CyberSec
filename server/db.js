@@ -279,6 +279,21 @@ async function initSchema() {
     await pool.query("ALTER TABLE tickets ADD COLUMN sla_breach_notified_at BIGINT");
   }
 
+  // Migration: a ticket can now have multiple assignees. The "assignee"
+  // column keeps its name (avoids a rename + touching every other
+  // migration/query above) but now holds a JSON array of user ids instead
+  // of a single id string. Existing rows still hold a plain string ('',
+  // 'unassigned', or a real id) — wrap those into a one-item (or empty)
+  // JSON array the first time this runs. The `NOT LIKE '[%'` guard makes
+  // this a cheap no-op scan on every later boot once a row is migrated.
+  const legacyAssigneeRows = (await pool.query(
+    "SELECT id, assignee FROM tickets WHERE assignee IS NULL OR assignee NOT LIKE '[%'"
+  )).rows;
+  for (const r of legacyAssigneeRows) {
+    const arr = (r.assignee && r.assignee !== "unassigned") ? [r.assignee] : [];
+    await pool.query("UPDATE tickets SET assignee = $1 WHERE id = $2", [JSON.stringify(arr), r.id]);
+  }
+
   // Migration: "can_delete_tickets" was added to users after some databases
   // already had the table created — same bolt-on reason as above.
   const userColumns = (await pool.query(
@@ -442,7 +457,7 @@ function ticketRowToApiShape(row, history, comments) {
     agency: row.agency,
     status: row.status,
     requestedBy: row.requested_by,
-    assignee: row.assignee,
+    assignees: JSON.parse(row.assignee || "[]"),
     createdAt: Number(row.created_at),
     priorityConfig: { hours: row.priority_hours, color: row.priority_color, label: row.priority_label },
     slaDate: Number(row.sla_date),
@@ -594,7 +609,7 @@ async function insertTicket(ticket) {
       0, NULL, 0, NULL, '[]', '', NULL, NULL, NULL
     )`,
     [
-      t.id, t.team, t.title, t.details, t.priority, t.category, t.client, t.agency, t.status, t.requestedBy, t.assignee,
+      t.id, t.team, t.title, t.details, t.priority, t.category, t.client, t.agency, t.status, t.requestedBy, JSON.stringify(t.assignees || []),
       t.createdAt, t.priorityHours, t.priorityColor, t.priorityLabel, t.slaDate
     ]
   );
@@ -637,7 +652,7 @@ const PATCHABLE_FIELDS = {
   agency: "agency",
   status: "status",
   requestedBy: "requested_by",
-  assignee: "assignee",
+  assignees: "assignee",
   isPaused: "is_paused",
   pausedAt: "paused_at",
   totalPausedMs: "total_paused_ms",
@@ -658,6 +673,7 @@ async function patchTicket(id, patch) {
     if (!column) return; // unknown/unpatchable field — ignored, not an error
     let value = patch[key];
     if (key === "isPaused") value = value ? 1 : 0;
+    if (key === "assignees") value = JSON.stringify(value || []);
     values.push(value);
     sets.push(column + " = $" + values.length);
   });
@@ -697,7 +713,7 @@ async function replaceAllTickets(tickets) {
   await ready;
   const previous = {};
   (await pool.query("SELECT id, status, assignee FROM tickets")).rows.forEach((r) => {
-    previous[r.id] = { status: r.status, assignee: r.assignee };
+    previous[r.id] = { status: r.status, assignees: JSON.parse(r.assignee || "[]") };
   });
 
   await withTransaction(async (client) => {
@@ -715,7 +731,7 @@ async function replaceAllTickets(tickets) {
           $17, $18, $19, $20, $21, $22, $23, $24, $25
         )`,
         [
-          t.id, t.team, t.title, t.details, t.priority, t.category, t.client || DEFAULT_CLIENT, t.agency || "", t.status, t.requestedBy, t.assignee || "",
+          t.id, t.team, t.title, t.details, t.priority, t.category, t.client || DEFAULT_CLIENT, t.agency || "", t.status, t.requestedBy, JSON.stringify(t.assignees || []),
           t.createdAt, cfg.hours, cfg.color, cfg.label, t.slaDate,
           t.isPaused ? 1 : 0, t.pausedAt != null ? t.pausedAt : null, t.totalPausedMs || 0, t.dateTimeResolved != null ? t.dateTimeResolved : null,
           JSON.stringify(t.attachments || []), t.rejectionReason || "", t.terminalSince != null ? t.terminalSince : null, t.unassignedSince != null ? t.unassignedSince : null,
@@ -737,16 +753,22 @@ async function replaceAllTickets(tickets) {
     }
   });
 
-  // status and assignee are independent axes of change — a single replace
+  // status and assignees are independent axes of change — a single replace
   // can flip both at once (e.g. reassign AND resolve in the same save), so
   // these are two separate `if`s, not an else-if chain, or the second event
   // would silently get dropped whenever both changed together.
+  function sameAssigneeSet(a, b) {
+    if (a.length !== b.length) return false;
+    const sa = [...a].sort();
+    const sb = [...b].sort();
+    return sa.every((v, i) => v === sb[i]);
+  }
   const events = { created: [], statusChanged: [], assigneeChanged: [] };
   tickets.forEach((t) => {
     const prev = previous[t.id];
     if (!prev) { events.created.push(t); return; }
     if (prev.status !== t.status) events.statusChanged.push({ ticket: t, oldStatus: prev.status });
-    if (prev.assignee !== t.assignee) events.assigneeChanged.push({ ticket: t, oldAssignee: prev.assignee });
+    if (!sameAssigneeSet(prev.assignees, t.assignees || [])) events.assigneeChanged.push({ ticket: t, oldAssignees: prev.assignees });
   });
 
   return { tickets: await getAllTickets(), events };

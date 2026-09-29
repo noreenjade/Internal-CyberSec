@@ -66,19 +66,21 @@ async function checkSlaBreaches() {
     const overdue = isOverdue(t, now);
 
     if (overdue && t.slaBreachNotifiedAt == null) {
-      const user = t.assignee ? await db.getUserById(t.assignee) : null;
-      if (user && user.email) {
-        const subject = "SLA Breach Alert — " + t.id + " is overdue";
-        const body = [
-          "Ticket " + t.id + " (" + t.team + " / " + t.priority + ") has crossed its SLA deadline.",
-          "",
-          "Title: " + t.title,
-          "Status: " + t.status,
-          "Overdue by: " + formatOverdueBy(now - t.slaDate),
-          "",
-          "Assigned to you — please take a look."
-        ].join("\n");
-        notifyAsync(user.email, subject, body);
+      for (const assigneeId of (t.assignees || [])) {
+        const user = await db.getUserById(assigneeId);
+        if (user && user.email) {
+          const subject = "SLA Breach Alert — " + t.id + " is overdue";
+          const body = [
+            "Ticket " + t.id + " (" + t.team + " / " + t.priority + ") has crossed its SLA deadline.",
+            "",
+            "Title: " + t.title,
+            "Status: " + t.status,
+            "Overdue by: " + formatOverdueBy(now - t.slaDate),
+            "",
+            "Assigned to you — please take a look."
+          ].join("\n");
+          notifyAsync(user.email, subject, body);
+        }
       }
       await db.patchTicket(t.id, { slaBreachNotifiedAt: now });
       notified++;
