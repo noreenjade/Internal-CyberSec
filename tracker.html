@@ -1564,6 +1564,69 @@
     var kb = bytes / 1024;
     return kb < 1024 ? kb.toFixed(1) + " KB" : (kb / 1024).toFixed(1) + " MB";
   }
+  // Shared between the ticket detail view's Attachments list and the Create
+  // Ticket form's — same row markup either way, differing only in which
+  // action/id the trash button reports (an existing ticket's real id for one,
+  // "create" for the other, since that draft has no ticket id yet).
+  function attachmentRowsHtml(attachments, deleteAction, deleteId) {
+    return (attachments || []).map(function (a) {
+      // Every accepted type (image, PDF, Office doc, txt) now has its actual
+      // bytes stored as a base64 data URI (see MAX_ATTACHMENT_BYTES / the
+      // file-selected handlers) — anyone who can open this ticket, any
+      // assignee included, can view or download it, not just whoever
+      // uploaded it. Only attachments added before this shipped stay
+      // metadata-only (no dataUrl was ever recorded for them), so those
+      // still fall back to a plain, non-interactive paperclip.
+      var isImage = a.dataUrl && a.dataUrl.indexOf("data:image/") === 0;
+      var isPdf = a.dataUrl && a.dataUrl.indexOf("data:application/pdf") === 0;
+      var icon = isImage
+        ? '<img src="' + a.dataUrl + '" class="attachment-thumb" data-action="preview-attachment" alt="' + escapeHtml(a.name) + '">'
+        : I("paperclip", 12);
+      // download="" (not just href) is what stops the browser from trying to
+      // navigate to / re-render a data URI as a page (which can mangle a
+      // binary .docx/.xlsx) and instead saves the exact original bytes under
+      // the original filename+extension — same reason a PDF gets a separate
+      // "View" link (target=_blank, no download attribute) alongside its
+      // "Download" one, so opening it in the browser's own PDF viewer
+      // doesn't also imply saving a copy.
+      var actions = "";
+      if (a.dataUrl && !isImage) {
+        if (isPdf) {
+          actions += '<a href="' + a.dataUrl + '" target="_blank" rel="noopener" class="attachment-action-link">View</a>';
+        }
+        actions += '<a href="' + a.dataUrl + '" download="' + escapeHtml(a.name) + '" class="attachment-action-link">Download</a>';
+      }
+      return '<div class="attachment-row">' + icon + '<span class="name">' + escapeHtml(a.name) + '</span>' +
+        (actions ? '<span class="attachment-actions">' + actions + "</span>" : "") +
+        '<span class="attachment-size mono">' + formatBytes(a.size) + "</span>" +
+        '<button type="button" class="icon-btn" style="height:22px;width:22px;border:none;flex-shrink:0" data-action="' + deleteAction + '" data-id="' + deleteId + '" data-attachment="' + a.id + '" title="Remove attachment">' + I("trash", 12) + "</button>" +
+        "</div>";
+    }).join("");
+  }
+  // Shared by both file inputs (an existing ticket's, and the Create Ticket
+  // form's) — validates against MAX_ATTACHMENT_BYTES, alerts once for
+  // whatever got skipped, then reads every usable file's actual bytes as a
+  // base64 data URI in parallel. Resolves to an array of new attachment
+  // objects ready to concat onto whichever attachments array the caller
+  // owns, or null if there was nothing usable to add (empty selection, or
+  // everything skipped for size) — callers no-op on null rather than each
+  // re-deriving that check themselves.
+  function readFilesAsAttachments(files) {
+    if (!files || !files.length) return Promise.resolve(null);
+    var oversizedFiles = files.filter(function (f) { return f.size > MAX_ATTACHMENT_BYTES; });
+    if (oversizedFiles.length) {
+      alert("Skipped (files must be under 5MB): " + oversizedFiles.map(function (f) { return f.name; }).join(", "));
+    }
+    var usableFiles = files.filter(function (f) { return oversizedFiles.indexOf(f) === -1; });
+    if (!usableFiles.length) return Promise.resolve(null);
+    return Promise.all(usableFiles.map(function (f) {
+      return new Promise(function (resolve) {
+        var reader = new FileReader();
+        reader.onload = function (ev) { resolve({ id: uid(), name: f.name, size: f.size, addedAt: Date.now(), dataUrl: ev.target.result }); };
+        reader.readAsDataURL(f);
+      });
+    }));
+  }
   // True while the SLA clock is frozen for ANY reason — an analyst-initiated
   // Pause, or the ticket having lost its assignee after the clock already
   // started (see unassignedSince below, set/cleared in updateTicket()'s
@@ -3177,39 +3240,7 @@
       return '<option value="' + escapeHtml(c) + '"' + (c === clientDraft ? " selected" : "") + ">" + escapeHtml(c) + "</option>";
     }).join("");
 
-    var attachmentsHtml = (t.attachments || []).map(function (a) {
-      // Every accepted type (image, PDF, Office doc, txt) now has its actual
-      // bytes stored as a base64 data URI (see MAX_ATTACHMENT_BYTES / the
-      // file-selected handler) — anyone who can open this ticket, any
-      // assignee included, can view or download it, not just whoever
-      // uploaded it. Only attachments added before this shipped stay
-      // metadata-only (no dataUrl was ever recorded for them), so those
-      // still fall back to a plain, non-interactive paperclip.
-      var isImage = a.dataUrl && a.dataUrl.indexOf("data:image/") === 0;
-      var isPdf = a.dataUrl && a.dataUrl.indexOf("data:application/pdf") === 0;
-      var icon = isImage
-        ? '<img src="' + a.dataUrl + '" class="attachment-thumb" data-action="preview-attachment" alt="' + escapeHtml(a.name) + '">'
-        : I("paperclip", 12);
-      // download="" (not just href) is what stops the browser from trying to
-      // navigate to / re-render a data URI as a page (which can mangle a
-      // binary .docx/.xlsx) and instead saves the exact original bytes under
-      // the original filename+extension — same reason a PDF gets a separate
-      // "View" link (target=_blank, no download attribute) alongside its
-      // "Download" one, so opening it in the browser's own PDF viewer
-      // doesn't also imply saving a copy.
-      var actions = "";
-      if (a.dataUrl && !isImage) {
-        if (isPdf) {
-          actions += '<a href="' + a.dataUrl + '" target="_blank" rel="noopener" class="attachment-action-link">View</a>';
-        }
-        actions += '<a href="' + a.dataUrl + '" download="' + escapeHtml(a.name) + '" class="attachment-action-link">Download</a>';
-      }
-      return '<div class="attachment-row">' + icon + '<span class="name">' + escapeHtml(a.name) + '</span>' +
-        (actions ? '<span class="attachment-actions">' + actions + "</span>" : "") +
-        '<span class="attachment-size mono">' + formatBytes(a.size) + "</span>" +
-        '<button type="button" class="icon-btn" style="height:22px;width:22px;border:none;flex-shrink:0" data-action="delete-attachment" data-id="' + t.id + '" data-attachment="' + a.id + '" title="Remove attachment">' + I("trash", 12) + "</button>" +
-        "</div>";
-    }).join("");
+    var attachmentsHtml = attachmentRowsHtml(t.attachments, "delete-attachment", t.id);
 
     // Collapsed entirely by default (not even the most-recent few entries) —
     // Status/Pause History is useful when you need it but is rarely the
@@ -3329,7 +3360,8 @@
       assignees: [],
       client: DEFAULT_CLIENT,
       agency: "", // "" = General/No specific agency; only meaningful when client === "NSOC"
-      agencyQuery: "" // raw text currently typed in the Agency combobox input
+      agencyQuery: "", // raw text currently typed in the Agency combobox input
+      attachments: [] // files picked before the ticket exists — sent along with the create POST, same {id,name,size,addedAt,dataUrl} shape as an existing ticket's
     };
   }
 
@@ -3376,7 +3408,13 @@
       (f.client === "NSOC"
         ? '<div><p class="section-label">Agency</p>' + agencyComboboxHtml("create", "", f.agencyQuery, "General / No specific agency") + "</div>"
         : "<div></div>") +
-      "</div></div>" +
+      "</div>" +
+      '<div><p class="section-label">Attachments</p>' +
+      '<input type="file" id="file-input-create" accept="' + ATTACHMENT_ACCEPT + '" multiple style="display:none" data-action="create-file-selected">' +
+      '<button type="button" class="dropzone" data-action="trigger-file" data-id="create">' + I("paperclip", 20) + '<span style="font-size:12px;font-weight:600">Click to attach files</span></button>' +
+      (f.attachments.length ? '<div style="margin-top:10px;display:flex;flex-direction:column;gap:6px">' + attachmentRowsHtml(f.attachments, "create-delete-attachment", "create") + "</div>" : "") +
+      '<p class="format-note">Accepted formats: PDF, PNG, JPG, JPEG, DOC, DOCX, XLS, XLSX, TXT</p></div>' +
+      "</div>" +
       '<div class="modal-footer">' +
       '<button type="button" class="btn-ghost" data-action="close-create">Cancel</button>' +
       '<button type="button" class="btn-primary" data-action="submit-create"' + (canSubmit ? "" : " disabled") + '>Create Ticket</button>' +
@@ -4423,6 +4461,11 @@
       updateTicket(id, { attachments: (tAtt.attachments || []).filter(function (a) { return a.id !== attId; }) });
       render(); return;
     }
+    if (action === "create-delete-attachment") {
+      var createAttId = el.getAttribute("data-attachment");
+      createForm.attachments = createForm.attachments.filter(function (a) { return a.id !== createAttId; });
+      render(); return;
+    }
     if (action === "post-comment") {
       var ca = document.querySelector('[data-role="comment-input"][data-id="' + id + '"]');
       var text = ca ? ca.value.trim() : "";
@@ -4936,7 +4979,8 @@
           requestedBy: (requestedByEl ? requestedByEl.value.trim() : "") || "Unspecified",
           assignees: assignees,
           client: f.client || DEFAULT_CLIENT,
-          agency: f.client === "NSOC" ? (f.agency || "") : ""
+          agency: f.client === "NSOC" ? (f.agency || "") : "",
+          attachments: f.attachments || []
         })
       }).then(function (res) {
         if (!res.ok) throw new Error("HTTP " + res.status);
@@ -5117,28 +5161,21 @@
       var id = el.getAttribute("data-id");
       var files = Array.prototype.slice.call(el.files || []);
       el.value = ""; // allow re-selecting the exact same file again later
-      if (!files.length) return;
-      var oversizedFiles = files.filter(function (f) { return f.size > MAX_ATTACHMENT_BYTES; });
-      if (oversizedFiles.length) {
-        alert("Skipped (files must be under 5MB): " + oversizedFiles.map(function (f) { return f.name; }).join(", "));
-      }
-      var usableFiles = files.filter(function (f) { return oversizedFiles.indexOf(f) === -1; });
-      if (!usableFiles.length) return;
-      // Every usable file gets its actual bytes read (as a base64 data URI)
-      // so it can be viewed/downloaded later, not just images. FileReader is
-      // async, so all files are read in parallel and the ticket is only
-      // updated/rendered once every one has resolved, to avoid clobbering
-      // each other's writes.
-      Promise.all(usableFiles.map(function (f) {
-        return new Promise(function (resolve) {
-          var reader = new FileReader();
-          reader.onload = function (ev) { resolve({ id: uid(), name: f.name, size: f.size, addedAt: Date.now(), dataUrl: ev.target.result }); };
-          reader.readAsDataURL(f);
-        });
-      })).then(function (newAtts) {
+      readFilesAsAttachments(files).then(function (newAtts) {
+        if (!newAtts) return; // nothing usable — already alerted inside readFilesAsAttachments
         var t = findTicket(id);
         if (!t) return;
         updateTicket(id, { attachments: (t.attachments || []).concat(newAtts) });
+        render();
+      });
+      return;
+    }
+    if (action === "create-file-selected") {
+      var createFiles = Array.prototype.slice.call(el.files || []);
+      el.value = "";
+      readFilesAsAttachments(createFiles).then(function (newAtts) {
+        if (!newAtts) return;
+        createForm.attachments = createForm.attachments.concat(newAtts);
         render();
       });
       return;

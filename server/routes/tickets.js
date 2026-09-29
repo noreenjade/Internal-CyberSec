@@ -217,6 +217,11 @@ router.post("/tickets", asyncRoute(async (req, res) => {
   const priority = body.priority;
   const requestedBy = (body.requestedBy || "").trim() || "Unspecified";
   const assignees = Array.isArray(body.assignees) ? body.assignees.filter(Boolean) : [];
+  // Files picked in the Create Ticket form before the ticket had an id —
+  // same {id,name,size,addedAt,dataUrl} shape an existing ticket's
+  // attachments already use (see PATCH/PUT below), just arriving at create
+  // time instead of added afterward.
+  const attachments = Array.isArray(body.attachments) ? body.attachments.filter((a) => a && a.name) : [];
 
   if (TEAMS.indexOf(team) === -1) return res.status(400).json({ error: "team must be one of: " + TEAMS.join(", ") });
   if (!title) return res.status(400).json({ error: "title is required" });
@@ -275,7 +280,8 @@ router.post("/tickets", asyncRoute(async (req, res) => {
     priorityHours: priorityConfig.hours,
     priorityColor: priorityConfig.color,
     priorityLabel: priorityConfig.label,
-    slaDate
+    slaDate,
+    attachments
   });
 
   await db.insertHistory({ id: uid(), ticketId: id, action: "Created", time: createdAt, note: "Ticket opened as New" });

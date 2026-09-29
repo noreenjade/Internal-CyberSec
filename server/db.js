@@ -606,11 +606,11 @@ async function insertTicket(ticket) {
     ) VALUES (
       $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
       $12, $13, $14, $15, $16,
-      0, NULL, 0, NULL, '[]', '', NULL, NULL, NULL
+      0, NULL, 0, NULL, $17, '', NULL, NULL, NULL
     )`,
     [
       t.id, t.team, t.title, t.details, t.priority, t.category, t.client, t.agency, t.status, t.requestedBy, JSON.stringify(t.assignees || []),
-      t.createdAt, t.priorityHours, t.priorityColor, t.priorityLabel, t.slaDate
+      t.createdAt, t.priorityHours, t.priorityColor, t.priorityLabel, t.slaDate, JSON.stringify(t.attachments || [])
     ]
   );
 }
