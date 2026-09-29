@@ -28,20 +28,30 @@ const { notifyAsync } = require("../mailer");
 
 const router = express.Router();
 
-function isUnassigned(assignee) {
-  return !assignee || assignee === "unassigned";
+function isUnassigned(assignees) {
+  return !assignees || assignees.length === 0;
+}
+
+function sameAssigneeSet(a, b) {
+  if (a.length !== b.length) return false;
+  const sa = [...a].sort();
+  const sb = [...b].sort();
+  return sa.every((v, i) => v === sb[i]);
 }
 
 // Single point of truth for assignment emails, used by all three places a
-// ticket's assignee can change (POST create, PATCH, and the bulk PUT diff)
+// ticket's assignees can change (POST create, PATCH, and the bulk PUT diff)
 // so the "new assignment" vs. "reassignment" split and each one's own
 // notification-preference gate only ever have to be gotten right once.
-//   - unassigned -> someone: "new assignment" — gated by prefs.newAssignment,
-//     emails only the new assignee.
-//   - someone -> a DIFFERENT someone: "reassignment" — gated by
-//     prefs.reassignment, emails BOTH the previous and new assignee.
-//   - someone -> unassigned, or no real change: no email either toggle's
-//     copy describes, so intentionally a no-op.
+// A ticket can now have multiple assignees, so this diffs the OLD and NEW
+// arrays as sets:
+//   - empty -> non-empty: "new assignment" — gated by prefs.newAssignment,
+//     emails every newly-added assignee.
+//   - non-empty -> still non-empty (any mix of adds/removes): "reassignment"
+//     — gated by prefs.reassignment, emails each removed assignee ("you're
+//     off this ticket") and each newly-added one ("you've been added").
+//   - non-empty -> empty, or no real change: no email either toggle's copy
+//     describes, so intentionally a no-op.
 // requestedBy is a free-text name (see the POST handler below), not a user
 // id — matching it by name against the roster (case-insensitive) is the
 // only way to resolve it to a real inbox/user; anyone who doesn't match a
@@ -54,9 +64,10 @@ async function findRequesterUser(ticket) {
   return users.find((u) => u.name.toLowerCase() === name) || null;
 }
 
-async function notifyAssignmentChange(ticket, oldAssignee) {
-  const newAssignee = ticket.assignee;
-  if (oldAssignee === newAssignee) return;
+async function notifyAssignmentChange(ticket, oldAssignees) {
+  const newAssignees = ticket.assignees || [];
+  oldAssignees = oldAssignees || [];
+  if (sameAssigneeSet(oldAssignees, newAssignees)) return;
   const prefs = await db.getNotificationPrefs();
 
   // Shows the ticket's requester as the visible sender (see mailer.js) when
@@ -64,37 +75,46 @@ async function notifyAssignmentChange(ticket, oldAssignee) {
   // account's own address/display name otherwise (department requesters,
   // typos, external requesters).
   const requester = await findRequesterUser(ticket);
-  const isNewAssignment = isUnassigned(oldAssignee) && !isUnassigned(newAssignee);
+  const isNewAssignment = isUnassigned(oldAssignees) && !isUnassigned(newAssignees);
   const mailOptions = requester
     ? { fromName: requester.name + " - " + (isNewAssignment ? "Create Ticket" : "Reassign Ticket"), replyTo: requester.email }
     : undefined;
 
+  const added = newAssignees.filter((id) => oldAssignees.indexOf(id) === -1);
+  const removed = oldAssignees.filter((id) => newAssignees.indexOf(id) === -1);
+
   if (isNewAssignment) {
     if (!prefs.newAssignment) return;
-    const user = await db.getUserById(newAssignee);
-    if (user) notifyAsync(user.email, "New ticket assigned: " + ticket.id, "You've been assigned " + ticket.id + " — " + ticket.title + ".\n\nDetails:\n" + ticket.details, mailOptions);
+    for (const uid of added) {
+      const user = await db.getUserById(uid);
+      if (user) notifyAsync(user.email, "New ticket assigned: " + ticket.id, "You've been assigned " + ticket.id + " — " + ticket.title + ".\n\nDetails:\n" + ticket.details, mailOptions);
+    }
     return;
   }
 
-  if (!isUnassigned(oldAssignee) && !isUnassigned(newAssignee)) {
+  if (!isUnassigned(oldAssignees) || !isUnassigned(newAssignees)) {
     if (!prefs.reassignment) return;
-    const prevUser = await db.getUserById(oldAssignee);
-    const newUser = await db.getUserById(newAssignee);
-    if (prevUser) {
-      notifyAsync(
-        prevUser.email,
-        "Ticket " + ticket.id + " reassigned",
-        ticket.id + " — " + ticket.title + " has been reassigned to " + (newUser ? newUser.name : "another analyst") + ".",
-        mailOptions
-      );
+    for (const uid of removed) {
+      const user = await db.getUserById(uid);
+      if (user) {
+        notifyAsync(
+          user.email,
+          "Ticket " + ticket.id + " reassigned",
+          ticket.id + " — " + ticket.title + " has been reassigned — you're no longer an assignee.",
+          mailOptions
+        );
+      }
     }
-    if (newUser) {
-      notifyAsync(
-        newUser.email,
-        "Ticket reassigned to you: " + ticket.id,
-        "You've been assigned " + ticket.id + " — " + ticket.title + (prevUser ? " (reassigned from " + prevUser.name + ")" : "") + ".\n\nDetails:\n" + ticket.details,
-        mailOptions
-      );
+    for (const uid of added) {
+      const user = await db.getUserById(uid);
+      if (user) {
+        notifyAsync(
+          user.email,
+          "Ticket assigned to you: " + ticket.id,
+          "You've been assigned " + ticket.id + " — " + ticket.title + ".\n\nDetails:\n" + ticket.details,
+          mailOptions
+        );
+      }
     }
   }
 }
@@ -144,8 +164,8 @@ router.put("/tickets", asyncRoute(async (req, res) => {
 
   const { tickets: saved, events } = await db.replaceAllTickets(tickets);
 
-  for (const t of events.created) await notifyAssignmentChange(t, "");
-  for (const { ticket, oldAssignee } of events.assigneeChanged) await notifyAssignmentChange(ticket, oldAssignee);
+  for (const t of events.created) await notifyAssignmentChange(t, []);
+  for (const { ticket, oldAssignees } of events.assigneeChanged) await notifyAssignmentChange(ticket, oldAssignees);
   // Not gated by the Status Change Notifications setting below — that
   // toggle only ever controlled the assignee-facing "status changed" email,
   // and the requester finding out their own ticket is done is a distinct
@@ -161,14 +181,16 @@ router.put("/tickets", asyncRoute(async (req, res) => {
   // separate code path and are never affected by this setting.
   if ((await db.getStatusChangeNotifyMode()) === "always") {
     for (const { ticket, oldStatus } of events.statusChanged) {
-      if (!isUnassigned(ticket.assignee)) {
-        const user = await db.getUserById(ticket.assignee);
-        if (user) {
-          notifyAsync(
-            user.email,
-            "Ticket " + ticket.id + " status changed",
-            ticket.id + " — " + ticket.title + " changed from " + oldStatus + " to " + ticket.status + "."
-          );
+      if (!isUnassigned(ticket.assignees)) {
+        for (const uid of ticket.assignees) {
+          const user = await db.getUserById(uid);
+          if (user) {
+            notifyAsync(
+              user.email,
+              "Ticket " + ticket.id + " status changed",
+              ticket.id + " — " + ticket.title + " changed from " + oldStatus + " to " + ticket.status + "."
+            );
+          }
         }
       }
     }
@@ -194,7 +216,7 @@ router.post("/tickets", asyncRoute(async (req, res) => {
   const details = (body.details || "").trim();
   const priority = body.priority;
   const requestedBy = (body.requestedBy || "").trim() || "Unspecified";
-  const assignee = body.assignee || "";
+  const assignees = Array.isArray(body.assignees) ? body.assignees.filter(Boolean) : [];
 
   if (TEAMS.indexOf(team) === -1) return res.status(400).json({ error: "team must be one of: " + TEAMS.join(", ") });
   if (!title) return res.status(400).json({ error: "title is required" });
@@ -234,7 +256,7 @@ router.post("/tickets", asyncRoute(async (req, res) => {
   // epoch-ms value, so 0 can never collide with a genuine deadline. If this
   // ticket IS assigned right at creation, the clock starts immediately, same
   // as it always has.
-  const slaDate = isUnassigned(assignee) ? 0 : createdAt + priorityConfig.hours * 3600 * 1000;
+  const slaDate = isUnassigned(assignees) ? 0 : createdAt + priorityConfig.hours * 3600 * 1000;
   const id = await db.nextTicketId(team);
 
   await db.insertTicket({
@@ -248,7 +270,7 @@ router.post("/tickets", asyncRoute(async (req, res) => {
     agency,
     status: "New",
     requestedBy,
-    assignee,
+    assignees,
     createdAt,
     priorityHours: priorityConfig.hours,
     priorityColor: priorityConfig.color,
@@ -260,7 +282,7 @@ router.post("/tickets", asyncRoute(async (req, res) => {
 
   const ticket = await db.getTicketById(id);
 
-  await notifyAssignmentChange(ticket, "");
+  await notifyAssignmentChange(ticket, []);
 
   res.status(201).json(ticket);
 }));
@@ -277,7 +299,7 @@ router.patch("/tickets/:id", asyncRoute(async (req, res) => {
   }
 
   const statusChanging = patch.status != null && patch.status !== existing.status;
-  const assigneeChanging = patch.assignee != null && patch.assignee !== existing.assignee;
+  const assigneeChanging = patch.assignees != null && !sameAssigneeSet(patch.assignees, existing.assignees);
   const finalPatch = Object.assign({}, patch);
 
   // Starts the SLA clock the moment a ticket gets its first assignee — only
@@ -285,20 +307,20 @@ router.patch("/tickets/:id", asyncRoute(async (req, res) => {
   // that's later unassigned and reassigned again keeps its original clock
   // running rather than restarting it (see the POST handler above for the
   // full rationale).
-  if (assigneeChanging && isUnassigned(existing.assignee) && !isUnassigned(patch.assignee) && existing.slaDate === 0) {
+  if (assigneeChanging && isUnassigned(existing.assignees) && !isUnassigned(patch.assignees) && existing.slaDate === 0) {
     finalPatch.slaDate = Date.now() + existing.priorityConfig.hours * 3600 * 1000;
   }
 
   // Same fix as updateTicket() in the HTML: once the clock has actually
-  // started (not the sentinel above), losing the assignee again freezes it
+  // started (not the sentinel above), losing every assignee again freezes it
   // — same idea as Pause, but automatic, and tracked in its own
   // unassigned_since column so it's never confused with (or cleared by) an
   // analyst's deliberate pause. Reassigning later credits the frozen
   // duration back into sla_date, same as Resume does.
-  if (assigneeChanging && !isUnassigned(existing.assignee) && isUnassigned(patch.assignee) && existing.slaDate !== 0) {
+  if (assigneeChanging && !isUnassigned(existing.assignees) && isUnassigned(patch.assignees) && existing.slaDate !== 0) {
     finalPatch.unassignedSince = Date.now();
   }
-  if (assigneeChanging && isUnassigned(existing.assignee) && !isUnassigned(patch.assignee) && existing.slaDate !== 0 && existing.unassignedSince != null) {
+  if (assigneeChanging && isUnassigned(existing.assignees) && !isUnassigned(patch.assignees) && existing.slaDate !== 0 && existing.unassignedSince != null) {
     finalPatch.slaDate = existing.slaDate + (Date.now() - existing.unassignedSince);
     finalPatch.unassignedSince = null;
   }
@@ -364,7 +386,7 @@ router.patch("/tickets/:id", asyncRoute(async (req, res) => {
 
   const updated = await db.patchTicket(id, finalPatch);
 
-  if (assigneeChanging) await notifyAssignmentChange(updated, existing.assignee);
+  if (assigneeChanging) await notifyAssignmentChange(updated, existing.assignees);
   if (statusChanging && updated.status === "Resolved") await notifyRequesterOnResolve(updated);
 
   res.json(updated);
@@ -404,15 +426,18 @@ router.post("/tickets/:id/comments", asyncRoute(async (req, res) => {
   const authorName = author ? author.name : "Someone";
   const mailOptions = author ? { fromName: authorName + " - Add Comment", replyTo: author.email } : undefined;
 
-  // Notify the ticket's assignee of the new comment, unless they're the one
-  // who just posted it, or they're also @mentioned in this same comment —
-  // in that case the more specific "you were mentioned" email below covers
-  // them, and sending both would just double-notify the same person for
-  // the same comment.
-  if (!isUnassigned(ticket.assignee) && ticket.assignee !== authorId && mentionedIds.indexOf(ticket.assignee) === -1) {
-    const assignee = await db.getUserById(ticket.assignee);
-    if (assignee) {
-      notifyAsync(assignee.email, "New comment on " + id, "A new comment was posted on " + id + " — " + ticket.title + ":\n\n" + text, mailOptions);
+  // Notify each of the ticket's assignees of the new comment, unless they're
+  // the one who just posted it, or they're also @mentioned in this same
+  // comment — in that case the more specific "you were mentioned" email
+  // below covers them, and sending both would just double-notify the same
+  // person for the same comment.
+  if (!isUnassigned(ticket.assignees)) {
+    for (const assigneeId of ticket.assignees) {
+      if (assigneeId === authorId || mentionedIds.indexOf(assigneeId) !== -1) continue;
+      const assignee = await db.getUserById(assigneeId);
+      if (assignee) {
+        notifyAsync(assignee.email, "New comment on " + id, "A new comment was posted on " + id + " — " + ticket.title + ":\n\n" + text, mailOptions);
+      }
     }
   }
 
