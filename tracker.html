@@ -5674,6 +5674,46 @@
   }, 1000);
 
   // =====================================================================
+  // LIVE SYNC — tickets otherwise only ever load once, on page load
+  // (loadTickets() above), so someone else's status change, comment, or
+  // reassignment would silently sit unseen until a person manually
+  // refreshed the tab. This re-fetches on an interval and merges in
+  // whatever's new, skipping a cycle entirely rather than risk clobbering
+  // something rather than merge badly:
+  //  - while a local change hasn't been confirmed saved yet (comparing
+  //    against lastSyncedTicketsById the same way persistTickets() does) —
+  //    otherwise this could overwrite an in-flight edit with the server's
+  //    still-stale copy of it, or race the PUT that's about to send it.
+  //  - while the user has an input/textarea focused (e.g. mid-comment) —
+  //    render() only preserves focus/cursor for the board and agency
+  //    search boxes, so rebuilding the DOM here would silently kick them
+  //    out of whatever they were typing.
+  var TICKET_POLL_INTERVAL_MS = 5000;
+  setInterval(function () {
+    if (ticketsLoadFailed) return; // no confirmed baseline to diff against — see loadTickets()'s catch handler
+    var activeTag = document.activeElement && document.activeElement.tagName;
+    if (activeTag === "INPUT" || activeTag === "TEXTAREA" || activeTag === "SELECT") return;
+    var localDirty = state.tickets.some(function (t) { return lastSyncedTicketsById[t.id] !== JSON.stringify(t); });
+    if (localDirty) return;
+    fetch(API_BASE_URL + "/tickets")
+      .then(function (res) { return res.json(); })
+      .then(function (data) {
+        var valid = Array.isArray(data) && data.every(function (t) {
+          return t && typeof t.id === "string" && typeof t.team === "string" && typeof t.status === "string";
+        });
+        if (!valid) return;
+        if (JSON.stringify(data) === JSON.stringify(state.tickets)) return; // nothing actually changed — skip the re-render
+        state.tickets = data;
+        lastSyncedTicketsById = {};
+        state.tickets.forEach(function (t) { lastSyncedTicketsById[t.id] = JSON.stringify(t); });
+        render();
+      })
+      .catch(function (err) {
+        console.error("[live sync] Could not refresh tickets from server:", err);
+      });
+  }, TICKET_POLL_INTERVAL_MS);
+
+  // =====================================================================
   // BOOTSTRAP
   // =====================================================================
   checkAuth();
