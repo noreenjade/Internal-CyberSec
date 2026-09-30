@@ -2740,7 +2740,11 @@
         '<td>' + escapeHtml(t.requestedBy) + "</td>" +
         '<td>' + assigneeTag(t.assignees, "sm") + "</td>" +
         '<td class="mono" style="color:var(--text-dim)">' + formatClock(t.createdAt) + "</td>" +
-        '<td style="text-align:right"><button type="button" class="btn-secondary" data-action="move-to-board" data-id="' + t.id + '">Move to Board</button></td>' +
+        '<td style="text-align:right;white-space:nowrap"><button type="button" class="btn-secondary" data-action="move-to-board" data-id="' + t.id + '">Move to Board</button>' +
+        (hasDeleteAccess(state.currentUserId)
+          ? '<button type="button" class="icon-btn" style="height:26px;width:26px;border:none;display:inline-flex;margin-left:6px;color:var(--danger)" data-action="delete-ticket" data-id="' + t.id + '" title="Delete ticket">' + I("trash", 14) + "</button>"
+          : "") +
+        "</td>" +
         "</tr>";
     }).join("");
 
