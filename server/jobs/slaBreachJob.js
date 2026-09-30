@@ -25,7 +25,7 @@
  * existing notification code paths in routes/tickets.js.
  */
 const db = require("../db");
-const { notifyAsync } = require("../mailer");
+const { notifyAsync, buildTicketEmailHtml } = require("../mailer");
 const { TERMINAL_STATUSES } = require("../constants");
 
 const CHECK_INTERVAL_MS = 5 * 60 * 1000; // how often to scan for newly-breached tickets
@@ -66,20 +66,26 @@ async function checkSlaBreaches() {
     const overdue = isOverdue(t, now);
 
     if (overdue && t.slaBreachNotifiedAt == null) {
+      const subject = "SLA Breach Alert — " + t.id + " is overdue";
+      const body = [
+        "Ticket " + t.id + " (" + t.team + " / " + t.priority + ") has crossed its SLA deadline.",
+        "",
+        "Title: " + t.title,
+        "Status: " + t.status,
+        "Overdue by: " + formatOverdueBy(now - t.slaDate),
+        "",
+        "Assigned to you — please take a look."
+      ].join("\n");
+      const html = buildTicketEmailHtml({
+        heading: "⚠️ SLA Breach Alert",
+        message: t.id + " has crossed its SLA deadline, overdue by " + formatOverdueBy(now - t.slaDate) + ". Please take a look.",
+        ticket: t,
+        ctaLabel: "View Ticket"
+      });
       for (const assigneeId of (t.assignees || [])) {
         const user = await db.getUserById(assigneeId);
         if (user && user.email) {
-          const subject = "SLA Breach Alert — " + t.id + " is overdue";
-          const body = [
-            "Ticket " + t.id + " (" + t.team + " / " + t.priority + ") has crossed its SLA deadline.",
-            "",
-            "Title: " + t.title,
-            "Status: " + t.status,
-            "Overdue by: " + formatOverdueBy(now - t.slaDate),
-            "",
-            "Assigned to you — please take a look."
-          ].join("\n");
-          notifyAsync(user.email, subject, body);
+          notifyAsync(user.email, subject, body, { html });
         }
       }
       await db.patchTicket(t.id, { slaBreachNotifiedAt: now });

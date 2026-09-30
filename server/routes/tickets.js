@@ -24,7 +24,7 @@ const express = require("express");
 const db = require("../db");
 const { STATUSES, TERMINAL_STATUSES, PRIORITIES, TEAMS, CLIENTS, DEFAULT_CLIENT } = require("../constants");
 const { uid, extractMentions, asyncRoute } = require("../util");
-const { notifyAsync } = require("../mailer");
+const { notifyAsync, buildTicketEmailHtml } = require("../mailer");
 
 const router = express.Router();
 
@@ -85,15 +85,17 @@ async function notifyAssignmentChange(ticket, oldAssignees) {
 
   if (isNewAssignment) {
     if (!prefs.newAssignment) return;
+    const html = buildTicketEmailHtml({ heading: "New ticket assigned to you", message: "You've been assigned the ticket below.", ticket, ctaLabel: "View Ticket" });
     for (const uid of added) {
       const user = await db.getUserById(uid);
-      if (user) notifyAsync(user.email, "New ticket assigned: " + ticket.id, "You've been assigned " + ticket.id + " — " + ticket.title + ".\n\nDetails:\n" + ticket.details, mailOptions);
+      if (user) notifyAsync(user.email, "New ticket assigned: " + ticket.id, "You've been assigned " + ticket.id + " — " + ticket.title + ".\n\nDetails:\n" + ticket.details, Object.assign({}, mailOptions, { html }));
     }
     return;
   }
 
   if (!isUnassigned(oldAssignees) || !isUnassigned(newAssignees)) {
     if (!prefs.reassignment) return;
+    const removedHtml = buildTicketEmailHtml({ heading: "You're no longer assigned to this ticket", message: "This ticket has been reassigned.", ticket, ctaLabel: "View Ticket" });
     for (const uid of removed) {
       const user = await db.getUserById(uid);
       if (user) {
@@ -101,10 +103,11 @@ async function notifyAssignmentChange(ticket, oldAssignees) {
           user.email,
           "Ticket " + ticket.id + " reassigned",
           ticket.id + " — " + ticket.title + " has been reassigned — you're no longer an assignee.",
-          mailOptions
+          Object.assign({}, mailOptions, { html: removedHtml })
         );
       }
     }
+    const addedHtml = buildTicketEmailHtml({ heading: "Ticket assigned to you", message: "You've been assigned the ticket below.", ticket, ctaLabel: "View Ticket" });
     for (const uid of added) {
       const user = await db.getUserById(uid);
       if (user) {
@@ -112,7 +115,7 @@ async function notifyAssignmentChange(ticket, oldAssignees) {
           user.email,
           "Ticket assigned to you: " + ticket.id,
           "You've been assigned " + ticket.id + " — " + ticket.title + ".\n\nDetails:\n" + ticket.details,
-          mailOptions
+          Object.assign({}, mailOptions, { html: addedHtml })
         );
       }
     }
@@ -134,10 +137,17 @@ async function notifyRequesterOnResolve(ticket) {
   const match = await findRequesterUser(ticket);
   if (!match) return;
   const notes = ticket.rejectionReason ? "\n\nResolution notes:\n" + ticket.rejectionReason : "";
+  const html = buildTicketEmailHtml({
+    heading: "Your ticket has been resolved",
+    message: "Good news — the ticket below has been marked Resolved." + (ticket.rejectionReason ? " Resolution notes:\n\n" + ticket.rejectionReason : ""),
+    ticket,
+    ctaLabel: "View Ticket"
+  });
   notifyAsync(
     match.email,
     "Your ticket " + ticket.id + " has been resolved",
-    ticket.id + " — " + ticket.title + " has been marked Resolved." + notes
+    ticket.id + " — " + ticket.title + " has been marked Resolved." + notes,
+    { html }
   );
 }
 
@@ -182,13 +192,20 @@ router.put("/tickets", asyncRoute(async (req, res) => {
   if ((await db.getStatusChangeNotifyMode()) === "always") {
     for (const { ticket, oldStatus } of events.statusChanged) {
       if (!isUnassigned(ticket.assignees)) {
+        const html = buildTicketEmailHtml({
+          heading: "Ticket status changed",
+          message: "Status changed from " + oldStatus + " to " + ticket.status + ".",
+          ticket,
+          ctaLabel: "View Ticket"
+        });
         for (const uid of ticket.assignees) {
           const user = await db.getUserById(uid);
           if (user) {
             notifyAsync(
               user.email,
               "Ticket " + ticket.id + " status changed",
-              ticket.id + " — " + ticket.title + " changed from " + oldStatus + " to " + ticket.status + "."
+              ticket.id + " — " + ticket.title + " changed from " + oldStatus + " to " + ticket.status + ".",
+              { html }
             );
           }
         }
@@ -438,11 +455,17 @@ router.post("/tickets/:id/comments", asyncRoute(async (req, res) => {
   // below covers them, and sending both would just double-notify the same
   // person for the same comment.
   if (!isUnassigned(ticket.assignees)) {
+    const commentHtml = buildTicketEmailHtml({
+      heading: "New comment on your ticket",
+      message: authorName + " wrote:\n\n" + text,
+      ticket,
+      ctaLabel: "View Comment"
+    });
     for (const assigneeId of ticket.assignees) {
       if (assigneeId === authorId || mentionedIds.indexOf(assigneeId) !== -1) continue;
       const assignee = await db.getUserById(assigneeId);
       if (assignee) {
-        notifyAsync(assignee.email, "New comment on " + id, "A new comment was posted on " + id + " — " + ticket.title + ":\n\n" + text, mailOptions);
+        notifyAsync(assignee.email, "New comment on " + id, "A new comment was posted on " + id + " — " + ticket.title + ":\n\n" + text, Object.assign({}, mailOptions, { html: commentHtml }));
       }
     }
   }
@@ -451,6 +474,12 @@ router.post("/tickets/:id/comments", asyncRoute(async (req, res) => {
   // fires unconditionally (even with SMTP unconfigured, where notifyAsync()
   // is a silent no-op) so mention detection is verifiable before SMTP is
   // set up.
+  const mentionHtml = buildTicketEmailHtml({
+    heading: "You were mentioned in a comment",
+    message: authorName + " mentioned you:\n\n" + text,
+    ticket,
+    ctaLabel: "View Comment"
+  });
   for (const userId of mentionedIds.filter((mid) => mid !== authorId)) {
     const mentionedUser = await db.getUserById(userId);
     if (!mentionedUser) continue;
@@ -459,7 +488,7 @@ router.post("/tickets/:id/comments", asyncRoute(async (req, res) => {
       mentionedUser.email,
       "You were mentioned on " + id,
       authorName + " mentioned you in a comment on " + id + " — " + ticket.title + ":\n\n" + text,
-      mailOptions
+      Object.assign({}, mailOptions, { html: mentionHtml })
     );
   }
 
