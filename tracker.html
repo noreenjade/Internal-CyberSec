@@ -562,6 +562,7 @@
   .history-content { padding-bottom: 12px; flex: 1; }
   .history-head { display: flex; align-items: baseline; gap: 8px; }
   .history-action { color: var(--text); font-weight: 700; }
+  .history-actor { color: var(--text-dim); font-size: 11px; }
   .history-time { color: var(--text-dimmer); font-family: var(--font-mono); font-size: 10px; }
   .history-note { color: var(--text-dim); margin: 3px 0 0; }
   .history-delete { margin-left: auto; display: flex; align-items: center; gap: 4px; border-radius: 5px; border: 1px solid var(--border-soft); background: var(--panel-alt); color: var(--text-dim); padding: 3px 6px; flex-shrink: 0; }
@@ -2327,7 +2328,9 @@
     return '<div class="history-row">' +
       '<div class="history-dot-col"><div class="history-dot">' + historyIcon(entry.action) + '</div><div class="history-line"></div></div>' +
       '<div class="history-content">' +
-      '<div class="history-head"><span class="history-action">' + escapeHtml(entry.action) + '</span><span class="history-time mono">' + formatClock(entry.time) + "</span>" +
+      '<div class="history-head"><span class="history-action">' + escapeHtml(entry.action) + '</span>' +
+      (entry.actorId ? '<span class="history-actor">· ' + escapeHtml(userName(entry.actorId)) + "</span>" : "") +
+      '<span class="history-time mono">' + formatClock(entry.time) + "</span>" +
       (canDelete ? '<button type="button" class="history-delete" data-action="delete-pause-log" data-id="' + ticketId + '" data-entry="' + entry.id + '" title="Delete this pause log — recalculates paused minutes and restores the SLA date">' + I("trash", 12) + "</button>" : "") +
       "</div>" +
       (entry.note ? '<p class="history-note">' + escapeHtml(entry.note) + "</p>" : "") +
@@ -4471,7 +4474,7 @@
       var t1 = findTicket(id);
       if (t1 && !t1.isPaused) {
         var pausedAt = Date.now();
-        var h1 = t1.history.concat([{ id: uid(), action: "Paused", time: pausedAt, note: "Paused by analyst" }]);
+        var h1 = t1.history.concat([{ id: uid(), action: "Paused", time: pausedAt, note: "Paused by analyst", actorId: state.currentUserId }]);
         updateTicket(id, { isPaused: true, pausedAt: pausedAt, history: h1 });
       }
       render(); return;
@@ -4481,7 +4484,7 @@
       if (t2 && t2.isPaused) {
         var resumedAt = Date.now();
         var pausedDuration = resumedAt - t2.pausedAt;
-        var h2 = t2.history.concat([{ id: uid(), action: "Resumed", time: resumedAt, durationMs: pausedDuration, note: "SLA extended by " + Math.max(1, Math.round(pausedDuration / 60000)) + " min" }]);
+        var h2 = t2.history.concat([{ id: uid(), action: "Resumed", time: resumedAt, durationMs: pausedDuration, note: "SLA extended by " + Math.max(1, Math.round(pausedDuration / 60000)) + " min", actorId: state.currentUserId }]);
         updateTicket(id, { isPaused: false, pausedAt: null, slaDate: t2.slaDate + pausedDuration, totalPausedMs: t2.totalPausedMs + pausedDuration, history: h2 });
       }
       render(); return;
@@ -5070,7 +5073,8 @@
           assignees: assignees,
           client: f.client || DEFAULT_CLIENT,
           agency: f.client === "NSOC" ? (f.agency || "") : "",
-          attachments: f.attachments || []
+          attachments: f.attachments || [],
+          createdBy: state.currentUserId
         })
       }).then(function (res) {
         if (!res.ok) throw new Error("HTTP " + res.status);
@@ -5312,7 +5316,8 @@
         action: "Resumed",
         time: changedAt,
         durationMs: pausedDuration,
-        note: "Auto-resumed — SLA extended by " + Math.max(1, Math.round(pausedDuration / 60000)) + " min (ticket closed while paused)"
+        note: "Auto-resumed — SLA extended by " + Math.max(1, Math.round(pausedDuration / 60000)) + " min (ticket closed while paused)",
+        actorId: state.currentUserId
       });
       patch.isPaused = false;
       patch.pausedAt = null;
@@ -5335,7 +5340,8 @@
         action: "Reopened",
         time: changedAt,
         durationMs: dwellMs,
-        note: "Reopened from " + t.status + " — SLA extended by " + Math.max(1, Math.round(dwellMs / 60000)) + " min (time spent closed doesn't count against the SLA)"
+        note: "Reopened from " + t.status + " — SLA extended by " + Math.max(1, Math.round(dwellMs / 60000)) + " min (time spent closed doesn't count against the SLA)",
+        actorId: state.currentUserId
       });
       patch.slaDate = t.slaDate + dwellMs;
     }
@@ -5346,7 +5352,8 @@
       time: changedAt,
       note: resolved
         ? "Marked Resolved (was " + t.status + ") — " + (rejectionReason || "No resolution notes provided")
-        : needsReason ? newStatus + " — " + (rejectionReason || "No reason provided") : (t.status + " → " + newStatus)
+        : needsReason ? newStatus + " — " + (rejectionReason || "No reason provided") : (t.status + " → " + newStatus),
+      actorId: state.currentUserId
     });
     patch.history = history;
     updateTicket(ticketId, patch);
@@ -5672,6 +5679,46 @@
       }
     }
   }, 1000);
+
+  // =====================================================================
+  // LIVE SYNC — tickets otherwise only ever load once, on page load
+  // (loadTickets() above), so someone else's status change, comment, or
+  // reassignment would silently sit unseen until a person manually
+  // refreshed the tab. This re-fetches on an interval and merges in
+  // whatever's new, skipping a cycle entirely rather than risk clobbering
+  // something rather than merge badly:
+  //  - while a local change hasn't been confirmed saved yet (comparing
+  //    against lastSyncedTicketsById the same way persistTickets() does) —
+  //    otherwise this could overwrite an in-flight edit with the server's
+  //    still-stale copy of it, or race the PUT that's about to send it.
+  //  - while the user has an input/textarea focused (e.g. mid-comment) —
+  //    render() only preserves focus/cursor for the board and agency
+  //    search boxes, so rebuilding the DOM here would silently kick them
+  //    out of whatever they were typing.
+  var TICKET_POLL_INTERVAL_MS = 5000;
+  setInterval(function () {
+    if (ticketsLoadFailed) return; // no confirmed baseline to diff against — see loadTickets()'s catch handler
+    var activeTag = document.activeElement && document.activeElement.tagName;
+    if (activeTag === "INPUT" || activeTag === "TEXTAREA" || activeTag === "SELECT") return;
+    var localDirty = state.tickets.some(function (t) { return lastSyncedTicketsById[t.id] !== JSON.stringify(t); });
+    if (localDirty) return;
+    fetch(API_BASE_URL + "/tickets")
+      .then(function (res) { return res.json(); })
+      .then(function (data) {
+        var valid = Array.isArray(data) && data.every(function (t) {
+          return t && typeof t.id === "string" && typeof t.team === "string" && typeof t.status === "string";
+        });
+        if (!valid) return;
+        if (JSON.stringify(data) === JSON.stringify(state.tickets)) return; // nothing actually changed — skip the re-render
+        state.tickets = data;
+        lastSyncedTicketsById = {};
+        state.tickets.forEach(function (t) { lastSyncedTicketsById[t.id] = JSON.stringify(t); });
+        render();
+      })
+      .catch(function (err) {
+        console.error("[live sync] Could not refresh tickets from server:", err);
+      });
+  }, TICKET_POLL_INTERVAL_MS);
 
   // =====================================================================
   // BOOTSTRAP

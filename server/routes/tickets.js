@@ -301,7 +301,13 @@ router.post("/tickets", asyncRoute(async (req, res) => {
     attachments
   });
 
-  await db.insertHistory({ id: uid(), ticketId: id, action: "Created", time: createdAt, note: "Ticket opened as New" });
+  // Prefers the authenticated session's id (req.user.sub) once Google
+  // Sign-In is configured — a real signed-in identity beats trusting
+  // whatever the client claims. body.createdBy is the fallback for today's
+  // no-auth-configured deployments, mirroring how comments already trust
+  // client-supplied authorId.
+  const actorId = (req.user && req.user.sub) || body.createdBy || null;
+  await db.insertHistory({ id: uid(), ticketId: id, action: "Created", time: createdAt, note: "Ticket opened as New", actorId });
 
   const ticket = await db.getTicketById(id);
 
@@ -324,6 +330,9 @@ router.patch("/tickets/:id", asyncRoute(async (req, res) => {
   const statusChanging = patch.status != null && patch.status !== existing.status;
   const assigneeChanging = patch.assignees != null && !sameAssigneeSet(patch.assignees, existing.assignees);
   const finalPatch = Object.assign({}, patch);
+  // Same "prefer the authenticated session, fall back to client-supplied"
+  // rule as the POST handler above.
+  const actorId = (req.user && req.user.sub) || patch.actorId || null;
 
   // Starts the SLA clock the moment a ticket gets its first assignee — only
   // fires while slaDate is still the "not started" sentinel (0), so a ticket
@@ -369,7 +378,8 @@ router.patch("/tickets/:id", asyncRoute(async (req, res) => {
         action: "Resumed",
         time: changedAt,
         note: "Auto-resumed — SLA extended by " + Math.max(1, Math.round(pausedDuration / 60000)) + " min (ticket closed while paused)",
-        durationMs: pausedDuration
+        durationMs: pausedDuration,
+        actorId
       });
       finalPatch.isPaused = false;
       finalPatch.pausedAt = null;
@@ -391,7 +401,8 @@ router.patch("/tickets/:id", asyncRoute(async (req, res) => {
         action: "Reopened",
         time: changedAt,
         note: "Reopened from " + existing.status + " — SLA extended by " + Math.max(1, Math.round(dwellMs / 60000)) + " min (time spent closed doesn't count against the SLA)",
-        durationMs: dwellMs
+        durationMs: dwellMs,
+        actorId
       });
       finalPatch.slaDate = existing.slaDate + dwellMs;
     }
@@ -403,7 +414,8 @@ router.patch("/tickets/:id", asyncRoute(async (req, res) => {
       ticketId: id,
       action: resolved ? "Resolved" : "Status Changed",
       time: changedAt,
-      note: resolved ? "Marked Resolved (was " + existing.status + ")" : (existing.status + " → " + patch.status)
+      note: resolved ? "Marked Resolved (was " + existing.status + ")" : (existing.status + " → " + patch.status),
+      actorId
     });
   }
 
