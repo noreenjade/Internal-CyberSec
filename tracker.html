@@ -2417,14 +2417,17 @@
         "</button>";
     }).join("");
 
-    // Open to everyone, same access level as the Board tabs — Backlog is
-    // just a deprioritized holding area for the current team's tickets, not
-    // an admin concern.
+    // Superadmin-only, and fully hidden (not just disabled) for anyone else
+    // — unlike Analytics/Settings' "visible but locked" treatment, a regular
+    // analyst shouldn't even know Backlog exists.
+    var backlogAllowed = isSuperAdmin(state.currentUserId);
     var backlogCount = state.tickets.filter(function (t) { return t.team === state.team && t.status === "Backlog"; }).length;
-    var backlogTab = '<button type="button" class="tab-btn' + (state.view === "backlog" ? " active" : "") + '" data-action="open-backlog" title="Tickets on hold — timer paused">' +
-      I("archive", 13) + '<span style="margin-left:6px">Backlog</span>' +
-      '<span class="tab-count mono">' + backlogCount + "</span>" +
-      "</button>";
+    var backlogTab = backlogAllowed
+      ? '<button type="button" class="tab-btn' + (state.view === "backlog" ? " active" : "") + '" data-action="open-backlog" title="Tickets on hold — timer paused">' +
+        I("archive", 13) + '<span style="margin-left:6px">Backlog</span>' +
+        '<span class="tab-count mono">' + backlogCount + "</span>" +
+        "</button>"
+      : "";
 
     // Superadmin-only — visible to everyone (so it isn't a mystery
     // disappearing feature) but disabled/grayed out for anyone else,
@@ -3370,7 +3373,12 @@
         "</div>";
     }
 
-    var statusOptions = STATUSES.map(function (s) { return '<option value="' + s + '"' + (s === statusDraft ? " selected" : "") + ">" + s + "</option>"; }).join("");
+    // Backlog is superadmin-only (see renderTeamTabs()) — hidden from a
+    // regular analyst's choices here too, except when the ticket is already
+    // sitting in Backlog, so the dropdown still shows its real current
+    // status truthfully instead of silently mismatching it.
+    var statusChoices = STATUSES.filter(function (s) { return s !== "Backlog" || isSuperAdmin(state.currentUserId) || t.status === "Backlog"; });
+    var statusOptions = statusChoices.map(function (s) { return '<option value="' + s + '"' + (s === statusDraft ? " selected" : "") + ">" + s + "</option>"; }).join("");
 
 
     var categoryListForTicket = CATEGORIES[t.team].indexOf(categoryDraft) === -1
@@ -3533,7 +3541,9 @@
       Object.keys(TEAMS).map(function (k) {
         return '<button type="button" class="' + (f.team === k ? "active" : "") + '" data-action="create-set-team" data-team="' + k + '">' + escapeHtml(TEAMS[k]) + "</button>";
       }).join("") + "</div></div>" +
-      '<label class="overdue-toggle"><input type="checkbox" data-action="create-toggle-backlog"' + (f.toBacklog ? " checked" : "") + "> " + I("archive", 12) + " Put this in Backlog instead (timer won't start until it's moved to the board)</label>" +
+      (isSuperAdmin(state.currentUserId)
+        ? '<label class="overdue-toggle"><input type="checkbox" data-action="create-toggle-backlog"' + (f.toBacklog ? " checked" : "") + "> " + I("archive", 12) + " Put this in Backlog instead (timer won't start until it's moved to the board)</label>"
+        : "") +
       '<div><p class="section-label">Title</p><input type="text" class="field-input" placeholder="Short summary of the task" data-role="create-title" value="' + escapeHtml(f.title) + '"></div>' +
       '<div><p class="section-label">' + (f.team === "TI" ? "Hunt Notes" : "Details") + '</p><textarea class="details-area" placeholder="Additional context, links, or notes" data-role="create-details">' + escapeHtml(f.details) + "</textarea>" +
       '<div data-role="details-links" data-id="create">' + detectedLinksHtml(f.details) + "</div></div>" +
@@ -4234,7 +4244,7 @@
       var html = renderTopBar() + renderTeamTabs();
       if (state.view === "board") html += renderBoard();
       else if (state.view === "analytics") html += renderAnalytics();
-      else if (state.view === "backlog") html += renderBacklog();
+      else if (state.view === "backlog" && isSuperAdmin(state.currentUserId)) html += renderBacklog();
       else html += settingsHtml();
       html += ticketModalHtml();
       html += createModalHtml();
@@ -4437,7 +4447,12 @@
       if (!isSuperAdmin(state.currentUserId)) return;
       state.view = "settings"; render(); return;
     }
-    if (action === "open-backlog") { state.view = "backlog"; render(); return; }
+    if (action === "open-backlog") {
+      // Defense-in-depth to match the tab itself being hidden for a
+      // non-superadmin — see renderTeamTabs().
+      if (!isSuperAdmin(state.currentUserId)) return;
+      state.view = "backlog"; render(); return;
+    }
     if (action === "open-analytics") {
       // Defense-in-depth to match the tab itself being disabled for a
       // non-superadmin — see renderTeamTabs().
