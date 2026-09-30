@@ -306,6 +306,8 @@
   .btn-secondary { border-radius: var(--radius-sm); background: var(--panel-alt); border: 1px solid var(--border-soft); color: var(--text); font-size: 12px; font-weight: 600; padding: 6px 12px; }
   .btn-secondary:hover { border-color: var(--text-faint); }
   .btn-secondary.active { border-color: var(--accent); color: var(--accent-strong); background: var(--accent-soft); }
+  .link-btn { background: none; border: none; padding: 0; color: var(--accent-strong); font-size: inherit; font-family: inherit; cursor: pointer; }
+  .link-btn:hover { text-decoration: underline; }
   .btn-danger { border-radius: var(--radius-sm); background: var(--danger); color: #fff; border: none; font-size: 12px; font-weight: 700; padding: 6px 12px; transition: filter .15s; }
   .btn-danger:hover { filter: brightness(1.1); }
 
@@ -1382,11 +1384,15 @@
     return '<span class="badge-category" title="Client">' + escapeHtml(label) + "</span>";
   }
 
-  // Standardized 5-status model, identical for both teams. "Paused" is
+  // Standardized status model, identical for both teams. "Paused" is
   // intentionally NOT a status — it's a freeze flag (ticket.isPaused) layered
   // on top of any of these, so a ticket keeps its real status while frozen.
-  var STATUSES = ["New", "In Progress", "Canceled", "Resolved", "Rejected"];
+  // "Backlog" is a deprioritized holding status — not terminal, not shown as
+  // a board column (it lives in its own Backlog view, see renderBacklog()) —
+  // BOARD_STATUSES below is what the Kanban board/sidebar actually render.
+  var STATUSES = ["Backlog", "New", "In Progress", "Canceled", "Resolved", "Rejected"];
   var TERMINAL_STATUSES = ["Canceled", "Resolved", "Rejected"];
+  var BOARD_STATUSES = STATUSES.filter(function (s) { return s !== "Backlog"; });
   var ATTACHMENT_ACCEPT = ".pdf,.png,.jpg,.jpeg,.doc,.docx,.xls,.xlsx,.txt";
   // Every accepted type gets its actual bytes stored (as a base64 data URI)
   // so it can be viewed/downloaded later by anyone who can open the ticket —
@@ -1444,12 +1450,13 @@
       arrowUpDown: '<path d="M8 4 V20"/><polyline points="4.5 7.5 8 4 11.5 7.5"/><path d="M16 20 V4"/><polyline points="12.5 16.5 16 20 19.5 16.5"/>',
       logOut: '<path d="M9 21 H5 a2 2 0 0 1 -2 -2 V5 a2 2 0 0 1 2 -2 h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>',
       google: '<path d="M21.6 12.2 c0-.7-.06-1.4-.19-2.05H12v3.9h5.4a4.6 4.6 0 0 1-2 3v2.5h3.24c1.9-1.75 3-4.3 3-7.35Z" fill="#4285F4" stroke="none"/><path d="M12 22c2.7 0 4.97-.9 6.63-2.42l-3.24-2.5c-.9.6-2.05.96-3.39.96-2.6 0-4.8-1.76-5.6-4.12H3.05v2.6A10 10 0 0 0 12 22Z" fill="#34A853" stroke="none"/><path d="M6.4 13.92a5.9 5.9 0 0 1 0-3.84v-2.6H3.05a10 10 0 0 0 0 9.04l3.35-2.6Z" fill="#FBBC05" stroke="none"/><path d="M12 6.06c1.47 0 2.79.5 3.82 1.5l2.87-2.87A9.8 9.8 0 0 0 12 2a10 10 0 0 0-8.95 5.48l3.35 2.6c.8-2.36 3-4.02 5.6-4.02Z" fill="#EA4335" stroke="none"/>',
-      moreVertical: '<circle cx="12" cy="5" r="1.4" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="12" cy="19" r="1.4" fill="currentColor" stroke="none"/>'
+      moreVertical: '<circle cx="12" cy="5" r="1.4" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="12" cy="19" r="1.4" fill="currentColor" stroke="none"/>',
+      archive: '<rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8 V19 a1 1 0 0 0 1 1 h12 a1 1 0 0 0 1 -1 V8"/><line x1="10" y1="12" x2="14" y2="12"/>'
     }[name] || "";
     var extraAttr = name === "loader" ? ' class="icon spin' + cls + '"' : (' class="icon' + cls + '"');
     return '<svg' + extraAttr + ' width="' + size + '" height="' + size + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + body + "</svg>";
   }
-  var STATUS_ICON = { New: "inbox", "In Progress": "circleDot", Canceled: "ban", Resolved: "checkCircle", Rejected: "xCircle" };
+  var STATUS_ICON = { Backlog: "archive", New: "inbox", "In Progress": "circleDot", Canceled: "ban", Resolved: "checkCircle", Rejected: "xCircle" };
 
   // =====================================================================
   // HELPERS
@@ -1538,6 +1545,7 @@
       rejectionReason: "",
       terminalSince: null,
       unassignedSince: null,
+      backlogSince: null,
       createdAt: created,
       priorityConfig: priorityConfig,
       slaDate: seedIsUnassigned ? SLA_NOT_STARTED : addHours(created, priorityConfig.hours)
@@ -1633,15 +1641,18 @@
     }));
   }
   // True while the SLA clock is frozen for ANY reason — an analyst-initiated
-  // Pause, or the ticket having lost its assignee after the clock already
-  // started (see unassignedSince below, set/cleared in updateTicket()'s
-  // single chokepoint). Two separate fields rather than reusing isPaused for
-  // both, so an analyst's deliberate pause is never silently cleared just
-  // because the ticket also happens to get reassigned.
-  function slaFrozen(t) { return t.isPaused || t.unassignedSince != null; }
+  // Pause, the ticket having lost its assignee after the clock already
+  // started (unassignedSince), or the ticket being deprioritized into
+  // Backlog status (backlogSince). Three separate fields rather than reusing
+  // isPaused for all of them, so an analyst's deliberate pause is never
+  // silently cleared just because the ticket also happens to get reassigned
+  // or moved to/from Backlog — each freeze reason clears independently, set
+  // in updateTicket()/changeStatus()'s own chokepoints.
+  function slaFrozen(t) { return t.isPaused || t.unassignedSince != null || t.backlogSince != null; }
   function remainingMs(t, now) {
     if (t.isPaused && t.pausedAt) return t.slaDate - t.pausedAt;
     if (t.unassignedSince != null) return t.slaDate - t.unassignedSince;
+    if (t.backlogSince != null) return t.slaDate - t.backlogSince;
     return t.slaDate - now;
   }
   function isOverdue(t, now) {
@@ -2406,6 +2417,15 @@
         "</button>";
     }).join("");
 
+    // Open to everyone, same access level as the Board tabs — Backlog is
+    // just a deprioritized holding area for the current team's tickets, not
+    // an admin concern.
+    var backlogCount = state.tickets.filter(function (t) { return t.team === state.team && t.status === "Backlog"; }).length;
+    var backlogTab = '<button type="button" class="tab-btn' + (state.view === "backlog" ? " active" : "") + '" data-action="open-backlog" title="Deprioritized tickets — SLA frozen while here">' +
+      I("archive", 13) + '<span style="margin-left:6px">Backlog</span>' +
+      '<span class="tab-count mono">' + backlogCount + "</span>" +
+      "</button>";
+
     // Superadmin-only — visible to everyone (so it isn't a mystery
     // disappearing feature) but disabled/grayed out for anyone else,
     // matching the "visible but locked, not hidden" preference. Uses the
@@ -2488,7 +2508,7 @@
         "</div>";
     }
 
-    return '<div class="tabs-row">' + tabs + analyticsTab + adminTab + actions + "</div>";
+    return '<div class="tabs-row">' + tabs + backlogTab + analyticsTab + adminTab + actions + "</div>";
   }
 
   // Every filter that narrows the board (team + assignee/overdue/client/
@@ -2556,14 +2576,18 @@
   }
 
   function renderSidebar() {
+    // Backlog lives in its own dedicated view (see renderBacklog()), not as a
+    // board column — excluded here so "All Tickets" and the board's own
+    // status counts describe the active pipeline only.
     var counts = { All: 0 };
-    STATUSES.forEach(function (s) { counts[s] = 0; });
+    BOARD_STATUSES.forEach(function (s) { counts[s] = 0; });
     filteredTeamTickets().forEach(function (t) {
+      if (t.status === "Backlog") return;
       counts.All += 1;
       counts[t.status] = (counts[t.status] || 0) + 1;
     });
     var items = [{ key: "All", label: "All Tickets", icon: "listChecks" }].concat(
-      STATUSES.map(function (s) { return { key: s, label: s, icon: STATUS_ICON[s] }; })
+      BOARD_STATUSES.map(function (s) { return { key: s, label: s, icon: STATUS_ICON[s] }; })
     );
     var rows = items.map(function (it) {
       var active = state.statusFilter === it.key;
@@ -2582,7 +2606,7 @@
     // mirror of whichever one is currently selected.
     var priorityOrder = ["Critical", "High", "Medium", "Low", "Informational"];
     var teamPriorityCfg = state.slaConfig[state.team] || {};
-    var ticketsForPriorityCounts = filteredTeamTickets();
+    var ticketsForPriorityCounts = filteredTeamTickets().filter(function (t) { return t.status !== "Backlog"; });
     var priorityCounts = { All: ticketsForPriorityCounts.length };
     priorityOrder.forEach(function (p) { priorityCounts[p] = 0; });
     ticketsForPriorityCounts.forEach(function (t) { priorityCounts[t.priority] = (priorityCounts[t.priority] || 0) + 1; });
@@ -2604,21 +2628,25 @@
   }
 
   function renderBoard() {
-    // Explicitly selecting "Resolved" in the sidebar always shows that
-    // column regardless of hideResolved — the toggle only collapses it out
-    // of the "All" overview.
-    var statusColumns = state.hideResolved ? STATUSES.filter(function (s) { return s !== "Resolved"; }) : STATUSES;
+    // Backlog never appears as a board column (it lives in its own view —
+    // see renderBacklog()). Explicitly selecting "Resolved" in the sidebar
+    // always shows that column regardless of hideResolved — the toggle only
+    // collapses it out of the "All" overview.
+    var statusColumns = state.hideResolved ? BOARD_STATUSES.filter(function (s) { return s !== "Resolved"; }) : BOARD_STATUSES;
     var visibleColumns = state.statusFilter === "All" ? statusColumns : [state.statusFilter];
     var visibleTickets = filteredTeamTickets();
     if (state.statusFilter !== "All") {
       visibleTickets = visibleTickets.filter(function (t) { return t.status === state.statusFilter; });
-    } else if (state.hideResolved) {
-      // Must drop these here, before grouping below — otherwise a Resolved
-      // ticket has no matching column in `grouped` and the fallback for a
-      // genuinely corrupt/unexpected status string (grouped[STATUSES[0]])
-      // would wrongly dump every hidden Resolved ticket into the New column
-      // instead of actually hiding it.
-      visibleTickets = visibleTickets.filter(function (t) { return normalizeStatus(t.status) !== "Resolved"; });
+    } else {
+      // Must drop these here, before grouping below — otherwise a ticket has
+      // no matching column in `grouped` and the fallback for a genuinely
+      // corrupt/unexpected status string (grouped["New"]) would wrongly dump
+      // every Backlog/hidden-Resolved ticket into the New column instead of
+      // actually excluding it.
+      visibleTickets = visibleTickets.filter(function (t) {
+        var s = normalizeStatus(t.status);
+        return s !== "Backlog" && !(state.hideResolved && s === "Resolved");
+      });
     }
     if (state.priorityFilter) visibleTickets = visibleTickets.filter(function (t) { return t.priority === state.priorityFilter; });
 
@@ -2629,7 +2657,7 @@
       // always placed in a real column instead of silently disappearing
       // (which is what a corrupted/unexpected status string would cause).
       var bucketStatus = normalizeStatus(t.status);
-      var bucket = grouped[bucketStatus] || grouped[STATUSES[0]];
+      var bucket = grouped[bucketStatus] || grouped["New"];
       if (bucket) bucket.push(t);
     });
 
@@ -2668,6 +2696,49 @@
 
     return toolbar + '<div class="layout-row">' + renderSidebar() +
       '<div class="board-area"><div class="board-grid">' + cols + "</div></div></div>";
+  }
+
+  // =====================================================================
+  // RENDER — BACKLOG
+  // =====================================================================
+  // A plain list, not a Kanban column, by design — Backlog is a deliberately
+  // separate holding area (see the "Hide Resolved" toggle's sibling reasoning
+  // above) for tickets the team isn't actively working, so it reads as its
+  // own view rather than a 6th column competing with the active pipeline.
+  function renderBacklog() {
+    var tickets = state.tickets
+      .filter(function (t) { return t.team === state.team && t.status === "Backlog"; })
+      .slice()
+      .sort(function (a, b) { return b.createdAt - a.createdAt; });
+
+    var rows = tickets.map(function (t) {
+      var cfg = t.priorityConfig || state.slaConfig[t.team][t.priority];
+      return '<tr>' +
+        '<td>' + priorityBadge(t.priority, cfg) + "</td>" +
+        '<td><button type="button" class="link-btn" data-action="open-ticket" data-id="' + t.id + '" style="font-weight:700">' + escapeHtml(t.id) + "</button></td>" +
+        '<td>' + escapeHtml(t.title) + "</td>" +
+        '<td>' + categoryBadge(t.category) + "</td>" +
+        '<td>' + escapeHtml(t.requestedBy) + "</td>" +
+        '<td>' + assigneeTag(t.assignees, "sm") + "</td>" +
+        '<td class="mono" style="color:var(--text-dim)">' + formatClock(t.createdAt) + "</td>" +
+        '<td style="text-align:right"><button type="button" class="btn-secondary" data-action="move-to-board" data-id="' + t.id + '">Move to Board</button></td>' +
+        "</tr>";
+    }).join("");
+
+    var body = tickets.length === 0
+      ? '<div class="column-empty" style="padding:48px 0">' + I("archive", 24) + "<span>No backlog tickets for this team.</span></div>"
+      : '<div class="table-scroll-wrap" style="overflow-x:auto"><table class="roster-table"><thead><tr>' +
+        "<th>Priority</th><th>ID</th><th>Title</th><th>Category</th><th>Requester</th><th>Assignees</th><th>Created</th><th></th>" +
+        "</tr></thead><tbody>" + rows + "</tbody></table></div>";
+
+    return '<div class="layout-row">' + renderSidebar() +
+      '<div class="board-area">' +
+      '<div class="settings-card" style="margin-bottom:16px">' +
+      '<h3 style="display:flex;align-items:center;gap:8px;margin:0 0 6px">' + I("archive", 16) + "Backlog</h3>" +
+      '<p class="footnote" style="margin:0">Deprioritized tickets sit here with the SLA clock frozen — move one back to the board whenever the team is ready to pick it up.</p>' +
+      "</div>" +
+      '<div class="settings-card">' + body + "</div>" +
+      "</div></div>";
   }
 
   // =====================================================================
@@ -3275,7 +3346,7 @@
         '<h4 style="color:var(--text-dim)">AWAITING ASSIGNMENT</h4>' +
         '<p>The ' + cfg.hours + "h SLA countdown starts as soon as this ticket is assigned to someone.</p></div></div>";
     } else {
-      var frozenLabel = t.unassignedSince != null ? "SLA Clock — Frozen (Unassigned)" : "SLA Clock — Frozen";
+      var frozenLabel = t.unassignedSince != null ? "SLA Clock — Frozen (Unassigned)" : t.backlogSince != null ? "SLA Clock — Frozen (Backlog)" : "SLA Clock — Frozen";
       slaBlock = '<div class="sla-panel"><div class="sla-panel-head">' +
         '<span class="lbl">' + (isPaused ? frozenLabel : overdue ? "SLA Countdown — Overdue" : "SLA Countdown") + "</span>" +
         '<span class="due">Due ' + formatClock(t.slaDate) + "</span></div>" +
@@ -3287,7 +3358,9 @@
         (overdue ? '<div class="mono" style="margin-top:6px;font-size:12px;font-weight:700;color:var(--danger)" data-role="modal-overdue-note">Overdue by ' + formatOverdueBy(rem) + " past the " + cfg.hours + "h SLA</div>" : "") +
         '<div class="sla-track"><div class="sla-track-fill" data-role="modal-track" style="width:' + Math.max(pct, 2) + "%;background:" + timerColor + '"></div></div>' +
         '<div class="sla-meta-row"><span>Priority SLA: ' + cfg.hours + "h (" + cfg.label + ')</span><span>Total paused: ' + Math.round(t.totalPausedMs / 60000) + " min</span></div>" +
-        (t.unassignedSince == null
+        (t.backlogSince != null
+          ? '<p class="footnote" style="margin-top:8px">Frozen because this ticket is in Backlog — move it out of Backlog to resume the SLA clock.</p>'
+          : t.unassignedSince == null
           ? '<div class="sla-actions">' +
             (!t.isPaused
               ? '<button type="button" class="btn-pause" data-action="pause-ticket" data-id="' + t.id + '">' + I("pause", 14) + " Pause</button>"
@@ -4159,6 +4232,7 @@
       var html = renderTopBar() + renderTeamTabs();
       if (state.view === "board") html += renderBoard();
       else if (state.view === "analytics") html += renderAnalytics();
+      else if (state.view === "backlog") html += renderBacklog();
       else html += settingsHtml();
       html += ticketModalHtml();
       html += createModalHtml();
@@ -4361,6 +4435,7 @@
       if (!isSuperAdmin(state.currentUserId)) return;
       state.view = "settings"; render(); return;
     }
+    if (action === "open-backlog") { state.view = "backlog"; render(); return; }
     if (action === "open-analytics") {
       // Defense-in-depth to match the tab itself being disabled for a
       // non-superadmin — see renderTeamTabs().
@@ -4445,6 +4520,7 @@
       return;
     }
     if (action === "open-ticket") { state.selectedId = id; state.historyExpanded = false; draftDetailsCache = {}; draftAssigneeCache = {}; draftCategoryCache = {}; draftClientCache = {}; draftAgencyCache = {}; draftAgencyQueryCache = {}; draftStatusCache = {}; commentDraftCache = { ticketId: null, text: "" }; editingCommentId = null; editingCommentDraft = null; openAssigneeDropdownFor = null; render(); return; }
+    if (action === "move-to-board") { changeStatus(id, "New"); render(); return; }
     if (action === "toggle-history") { state.historyExpanded = !state.historyExpanded; render(); return; }
     if (action === "close-ticket" || action === "overlay-close-ticket") { state.selectedId = null; render(); return; }
 
@@ -5320,15 +5396,28 @@
     var history = t.history.slice();
     var patch = { status: newStatus, dateTimeResolved: resolved ? changedAt : null, terminalSince: isTerminal ? changedAt : null };
     if (needsReason) patch.rejectionReason = rejectionReason || "";
+    // Tracks slaDate as each block below potentially credits time back into
+    // it, so later blocks (and the Backlog-freeze one at the end) always
+    // extend from the up-to-date value instead of stomping an earlier credit.
+    var effectiveSlaDate = t.slaDate;
+
+    // Leaving Backlog credits the frozen duration back into slaDate, same as
+    // Resume/reassignment do for their own freeze reasons.
+    if (t.status === "Backlog" && newStatus !== "Backlog" && t.backlogSince != null) {
+      effectiveSlaDate = effectiveSlaDate + (changedAt - t.backlogSince);
+      patch.slaDate = effectiveSlaDate;
+      patch.backlogSince = null;
+    }
 
     // The Status dropdown is reachable even on a paused ticket (only the
-    // Pause/Resume buttons themselves are hidden once terminal) — closing a
-    // still-paused ticket this way, bypassing Resume, must finalize the
-    // pause exactly like clicking Resume would. Otherwise isPaused/pausedAt
-    // are left stale, and reopening the ticket later (also allowed by this
-    // same dropdown) computes the "frozen" countdown against a pausedAt from
-    // whenever it happened to be force-closed, corrupting the SLA math.
-    if (isTerminal && t.isPaused && t.pausedAt) {
+    // Pause/Resume buttons themselves are hidden once terminal or in
+    // Backlog) — closing (or backlogging) a still-paused ticket this way,
+    // bypassing Resume, must finalize the pause exactly like clicking Resume
+    // would. Otherwise isPaused/pausedAt are left stale, and reopening the
+    // ticket later (also allowed by this same dropdown) computes the
+    // "frozen" countdown against a pausedAt from whenever it happened to be
+    // force-closed, corrupting the SLA math.
+    if ((isTerminal || newStatus === "Backlog") && t.isPaused && t.pausedAt) {
       var pausedDuration = changedAt - t.pausedAt;
       history.push({
         id: uid(),
@@ -5340,7 +5429,8 @@
       });
       patch.isPaused = false;
       patch.pausedAt = null;
-      patch.slaDate = t.slaDate + pausedDuration;
+      effectiveSlaDate = effectiveSlaDate + pausedDuration;
+      patch.slaDate = effectiveSlaDate;
       patch.totalPausedMs = t.totalPausedMs + pausedDuration;
     }
 
@@ -5362,7 +5452,16 @@
         note: "Reopened from " + t.status + " — SLA extended by " + Math.max(1, Math.round(dwellMs / 60000)) + " min (time spent closed doesn't count against the SLA)",
         actorId: state.currentUserId
       });
-      patch.slaDate = t.slaDate + dwellMs;
+      effectiveSlaDate = effectiveSlaDate + dwellMs;
+      patch.slaDate = effectiveSlaDate;
+    }
+
+    // Entering Backlog freezes the SLA clock (same idea as Pause, but
+    // automatic) — only when the clock has actually started, since there's
+    // nothing to freeze otherwise. Any Resumed/Reopened credit above has
+    // already landed in effectiveSlaDate, so freezing here can never lose it.
+    if (newStatus === "Backlog" && t.status !== "Backlog" && !slaNotStarted(t)) {
+      patch.backlogSince = changedAt;
     }
 
     history.push({

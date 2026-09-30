@@ -5,9 +5,11 @@
  * (seeding) and routes/tickets.js (validation) so the two never drift.
  */
 
-// Same 5-status model as the frontend. "Paused" is not a status there
-// either — it's the isPaused/pausedAt flag layered on top of any of these.
-const STATUSES = ["New", "In Progress", "Canceled", "Resolved", "Rejected"];
+// Same status model as the frontend. "Paused" is not a status there either
+// — it's the isPaused/pausedAt flag layered on top of any of these. "Backlog"
+// is a deprioritized holding status (not terminal) — its own SLA clock freeze
+// works the same way as unassignedSince (see backlogSince in db.js/tracker.html).
+const STATUSES = ["Backlog", "New", "In Progress", "Canceled", "Resolved", "Rejected"];
 const TERMINAL_STATUSES = ["Canceled", "Resolved", "Rejected"];
 const PRIORITIES = ["Critical", "High", "Medium", "Low", "Informational"];
 // The two internal teams — who actually does the work. NSOC/QC are NOT

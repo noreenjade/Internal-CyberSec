@@ -153,6 +153,7 @@ async function initSchema() {
       rejection_reason    TEXT NOT NULL DEFAULT '', -- t.rejectionReason — only meaningful when status = "Rejected"; required at the point of rejection (frontend prompts for it), '' otherwise
       terminal_since      BIGINT,               -- t.terminalSince (ms epoch, nullable) — set when the ticket enters a terminal status (Resolved/Rejected/Canceled), cleared+consumed (credited back into sla_date) when it's reopened, so time spent closed never counts against the SLA
       unassigned_since    BIGINT,               -- t.unassignedSince (ms epoch, nullable) — set when an already-started ticket loses its assignee, cleared+consumed (credited back into sla_date) when it's reassigned, so time spent unassigned never counts against the SLA either
+      backlog_since       BIGINT,               -- t.backlogSince (ms epoch, nullable) — set when the ticket enters "Backlog" status while its SLA clock is already running, cleared+consumed (credited back into sla_date) when it leaves Backlog, same freeze/credit pattern as unassigned_since
       sla_breach_notified_at BIGINT             -- server-only bookkeeping for jobs/slaBreachJob.js (ms epoch, nullable): set once the assignee has been emailed for the ticket's current breach, cleared once the ticket stops being overdue (resolved, frozen, or SLA credited back past now), so a later breach can alert again. Never read or written by the frontend — it just round-trips this field untouched, same as terminal_since/unassigned_since.
     );
 
@@ -313,6 +314,12 @@ async function initSchema() {
   )).rows.map((r) => r.column_name);
   if (!historyColumns.includes("actor_id")) {
     await pool.query("ALTER TABLE history ADD COLUMN actor_id TEXT");
+  }
+
+  // Migration: "backlog_since" was added to tickets after some databases
+  // already had the table created — same bolt-on reason as above.
+  if (!ticketColumns.includes("backlog_since")) {
+    await pool.query("ALTER TABLE tickets ADD COLUMN backlog_since BIGINT");
   }
 
   // One-time data fix for the "SLA only counts once assigned" change: tickets
@@ -480,6 +487,7 @@ function ticketRowToApiShape(row, history, comments) {
     rejectionReason: row.rejection_reason || "",
     terminalSince: row.terminal_since != null ? Number(row.terminal_since) : null,
     unassignedSince: row.unassigned_since != null ? Number(row.unassigned_since) : null,
+    backlogSince: row.backlog_since != null ? Number(row.backlog_since) : null,
     slaBreachNotifiedAt: row.sla_breach_notified_at != null ? Number(row.sla_breach_notified_at) : null,
     attachments: JSON.parse(row.attachments || "[]"),
     history: history || [],
@@ -614,11 +622,11 @@ async function insertTicket(ticket) {
     `INSERT INTO tickets (
       id, team, title, details, priority, category, client, agency, status, requested_by, assignee,
       created_at, priority_hours, priority_color, priority_label, sla_date,
-      is_paused, paused_at, total_paused_ms, date_time_resolved, attachments, rejection_reason, terminal_since, unassigned_since, sla_breach_notified_at
+      is_paused, paused_at, total_paused_ms, date_time_resolved, attachments, rejection_reason, terminal_since, unassigned_since, sla_breach_notified_at, backlog_since
     ) VALUES (
       $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
       $12, $13, $14, $15, $16,
-      0, NULL, 0, NULL, $17, '', NULL, NULL, NULL
+      0, NULL, 0, NULL, $17, '', NULL, NULL, NULL, NULL
     )`,
     [
       t.id, t.team, t.title, t.details, t.priority, t.category, t.client, t.agency, t.status, t.requestedBy, JSON.stringify(t.assignees || []),
@@ -673,6 +681,7 @@ const PATCHABLE_FIELDS = {
   rejectionReason: "rejection_reason",
   terminalSince: "terminal_since",
   unassignedSince: "unassigned_since",
+  backlogSince: "backlog_since",
   slaBreachNotifiedAt: "sla_breach_notified_at"
 };
 
@@ -736,18 +745,18 @@ async function replaceAllTickets(tickets) {
         `INSERT INTO tickets (
           id, team, title, details, priority, category, client, agency, status, requested_by, assignee,
           created_at, priority_hours, priority_color, priority_label, sla_date,
-          is_paused, paused_at, total_paused_ms, date_time_resolved, attachments, rejection_reason, terminal_since, unassigned_since, sla_breach_notified_at
+          is_paused, paused_at, total_paused_ms, date_time_resolved, attachments, rejection_reason, terminal_since, unassigned_since, sla_breach_notified_at, backlog_since
         ) VALUES (
           $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
           $12, $13, $14, $15, $16,
-          $17, $18, $19, $20, $21, $22, $23, $24, $25
+          $17, $18, $19, $20, $21, $22, $23, $24, $25, $26
         )`,
         [
           t.id, t.team, t.title, t.details, t.priority, t.category, t.client || DEFAULT_CLIENT, t.agency || "", t.status, t.requestedBy, JSON.stringify(t.assignees || []),
           t.createdAt, cfg.hours, cfg.color, cfg.label, t.slaDate,
           t.isPaused ? 1 : 0, t.pausedAt != null ? t.pausedAt : null, t.totalPausedMs || 0, t.dateTimeResolved != null ? t.dateTimeResolved : null,
           JSON.stringify(t.attachments || []), t.rejectionReason || "", t.terminalSince != null ? t.terminalSince : null, t.unassignedSince != null ? t.unassignedSince : null,
-          t.slaBreachNotifiedAt != null ? t.slaBreachNotifiedAt : null
+          t.slaBreachNotifiedAt != null ? t.slaBreachNotifiedAt : null, t.backlogSince != null ? t.backlogSince : null
         ]
       );
       for (const h of (t.history || [])) {
