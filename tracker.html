@@ -2421,7 +2421,7 @@
     // just a deprioritized holding area for the current team's tickets, not
     // an admin concern.
     var backlogCount = state.tickets.filter(function (t) { return t.team === state.team && t.status === "Backlog"; }).length;
-    var backlogTab = '<button type="button" class="tab-btn' + (state.view === "backlog" ? " active" : "") + '" data-action="open-backlog" title="Deprioritized tickets — SLA frozen while here">' +
+    var backlogTab = '<button type="button" class="tab-btn' + (state.view === "backlog" ? " active" : "") + '" data-action="open-backlog" title="Tickets on hold — timer paused">' +
       I("archive", 13) + '<span style="margin-left:6px">Backlog</span>' +
       '<span class="tab-count mono">' + backlogCount + "</span>" +
       "</button>";
@@ -2735,7 +2735,7 @@
       '<div class="board-area">' +
       '<div class="settings-card" style="margin-bottom:16px">' +
       '<h3 style="display:flex;align-items:center;gap:8px;margin:0 0 6px">' + I("archive", 16) + "Backlog</h3>" +
-      '<p class="footnote" style="margin:0">Deprioritized tickets sit here with the SLA clock frozen — move one back to the board whenever the team is ready to pick it up.</p>' +
+      '<p class="footnote" style="margin:0">Tickets on hold live here, and their timer is paused. Move one back to the board when the team is ready to work on it.</p>' +
       "</div>" +
       '<div class="settings-card">' + body + "</div>" +
       "</div></div>";
@@ -3359,7 +3359,7 @@
         '<div class="sla-track"><div class="sla-track-fill" data-role="modal-track" style="width:' + Math.max(pct, 2) + "%;background:" + timerColor + '"></div></div>' +
         '<div class="sla-meta-row"><span>Priority SLA: ' + cfg.hours + "h (" + cfg.label + ')</span><span>Total paused: ' + Math.round(t.totalPausedMs / 60000) + " min</span></div>" +
         (t.backlogSince != null
-          ? '<p class="footnote" style="margin-top:8px">Frozen because this ticket is in Backlog — move it out of Backlog to resume the SLA clock.</p>'
+          ? '<p class="footnote" style="margin-top:8px">This ticket is in Backlog, so its timer is paused. Change the status to start it again.</p>'
           : t.unassignedSince == null
           ? '<div class="sla-actions">' +
             (!t.isPaused
@@ -3533,7 +3533,7 @@
       Object.keys(TEAMS).map(function (k) {
         return '<button type="button" class="' + (f.team === k ? "active" : "") + '" data-action="create-set-team" data-team="' + k + '">' + escapeHtml(TEAMS[k]) + "</button>";
       }).join("") + "</div></div>" +
-      '<label class="overdue-toggle"><input type="checkbox" data-action="create-toggle-backlog"' + (f.toBacklog ? " checked" : "") + "> " + I("archive", 12) + " Send straight to Backlog (SLA frozen until moved to the board)</label>" +
+      '<label class="overdue-toggle"><input type="checkbox" data-action="create-toggle-backlog"' + (f.toBacklog ? " checked" : "") + "> " + I("archive", 12) + " Put this in Backlog instead (timer won't start until it's moved to the board)</label>" +
       '<div><p class="section-label">Title</p><input type="text" class="field-input" placeholder="Short summary of the task" data-role="create-title" value="' + escapeHtml(f.title) + '"></div>' +
       '<div><p class="section-label">' + (f.team === "TI" ? "Hunt Notes" : "Details") + '</p><textarea class="details-area" placeholder="Additional context, links, or notes" data-role="create-details">' + escapeHtml(f.details) + "</textarea>" +
       '<div data-role="details-links" data-id="create">' + detectedLinksHtml(f.details) + "</div></div>" +
