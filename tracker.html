@@ -3706,12 +3706,12 @@
     }).join("");
 
     return '<div class="settings-panel-head"><h2>' + I("settings", 17) + " SLA Configurations</h2>" +
-      '<p>Set the SLA deadline (in hours) for each priority level, per team. Edit hours below, then click <span style="color:var(--text)">Save</span> to commit; new tickets pick up the saved values immediately. Existing tickets keep their already-computed SLA date and never change retroactively.</p></div>' +
+      '<p>Set the SLA deadline (in hours) per priority and team. New tickets use the saved values right away — existing tickets keep theirs.</p></div>' +
       teamToggle +
       '<div class="settings-card" style="margin-top:16px">' + cards + "</div>" +
       '<div class="settings-save-row"><button type="button" class="btn-primary" data-action="save-sla"' + (isDirty ? "" : " disabled") + ">Save SLA Configurations</button>" +
       (isDirty ? '<span class="unsaved-flag">Unsaved changes</span>' : "") + "</div>" +
-      '<p class="footnote">Changes save immediately and apply system-wide the moment you click Save.</p>';
+      '<p class="footnote">Changes apply system-wide as soon as you click Save.</p>';
   }
 
   // ---- Panel: Team Roster & Roles (new, read-only) ----
@@ -3782,7 +3782,7 @@
     }
 
     return '<div class="settings-panel-head"><h2>' + I("users", 17) + " Team Roster &amp; Roles</h2>" +
-      "<p>Everyone with a seat on SOC, Threat Hunt, or Leadership. Editing a name, team, role, email, or Superadmin status here updates it everywhere else in the app immediately — assignee dropdowns, the active-user selector, @mentions, and every email notification.</p></div>" +
+      "<p>Everyone on SOC, Threat Hunt, or Leadership. Edits here update everywhere else in the app right away.</p></div>" +
       '<div style="display:flex;justify-content:flex-end;margin-bottom:12px">' +
       '<button type="button" class="btn-primary roster-showcase-add-btn" data-action="roster-add-start"' + (addingUser ? " disabled" : "") + ">+ Add Team Member</button></div>" +
       '<div class="settings-card roster-showcase"><div class="table-scroll-wrap" style="overflow-x:auto"><table class="roster-table"><thead><tr>' +
@@ -3833,7 +3833,7 @@
 
   function categoriesPanelHtml() {
     return '<div class="settings-panel-head"><h2>' + I("listChecks", 17) + " Manage Categories</h2>" +
-      "<p>The ticket categories analysts pick from when creating or editing a ticket, per team. Add, rename, or remove them here — the Create Ticket form and every open ticket's Category field pick up the change immediately. Renaming or deleting a category never rewrites tickets that already used the old name; they keep showing their original value.</p></div>" +
+      "<p>Categories analysts pick from per team. Changes apply right away — renaming or deleting never changes tickets that already used the old name.</p></div>" +
       categoryListHtml("SOC") +
       categoryListHtml("TI");
   }
@@ -3868,7 +3868,7 @@
     }
 
     return '<div class="settings-panel-head"><h2>' + I("listChecks", 17) + " Manage Clients</h2>" +
-      "<p>Who a ticket is for, independent of which internal team (SOC or Threat Hunt) is doing the work. Add, rename, or remove them here — the Create Ticket form and every open ticket's Client field pick up the change immediately. Renaming or deleting a client never rewrites tickets that already used the old name; they keep showing their original value.</p></div>" +
+      "<p>Who a ticket is for, separate from which team does the work. Changes apply right away — renaming or deleting never changes tickets that already used the old name.</p></div>" +
       '<div class="settings-card">' +
       '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">' +
       '<p class="settings-card-title" style="margin:0">Clients (' + list.length + ")</p>" +
@@ -3972,7 +3972,7 @@
 
   function agenciesPanelHtml() {
     return '<div class="settings-panel-head"><h2>' + I("listChecks", 17) + " Manage Agencies</h2>" +
-      "<p>Agencies analysts pick when a ticket's Client is NSOC. Changes apply immediately; renaming or deleting never rewrites tickets that already used the old name.</p></div>" +
+      "<p>Agencies for NSOC-client tickets. Changes apply right away; renaming or deleting never changes tickets that already used the old name.</p></div>" +
       agencyListHtml("NSOC");
   }
 
@@ -3987,10 +3987,10 @@
     }).join("");
 
     return '<div class="settings-panel-head"><h2>' + I("lock", 17) + " Access Control &amp; Permissions</h2>" +
-      "<p>Superadmin is a separate switch from a person's title/role — it only controls whether they can reach this console. A Sr. SE isn't automatically a superadmin, and a superadmin isn't automatically the most senior analyst on a team. Grant or revoke it from Team Roster &amp; Roles.</p></div>" +
+      "<p>Superadmin controls who can reach this console — it's separate from someone's title or role. Grant or revoke it from Team Roster &amp; Roles.</p></div>" +
       '<div class="settings-card"><p class="settings-card-title">Current Superadmins (' + admins.length + ")</p>" +
       '<div class="table-scroll-wrap" style="overflow-x:auto"><table class="roster-table"><thead><tr><th>Name</th><th>Email</th><th>Title / Role</th><th>Access</th></tr></thead><tbody>' + adminRows + "</tbody></table></div></div>" +
-      '<p class="footnote">Changes to Superadmin access save immediately. If someone is currently signed in when their access changes, they\'ll need to sign out and back in for it to take effect.</p>';
+      '<p class="footnote">Applies right away — someone already signed in needs to sign out and back in to see the change.</p>';
   }
 
   // ---- Panel: System & SLA Notifications ----
@@ -4022,7 +4022,7 @@
       "</select></div>";
 
     return '<div class="settings-panel-head"><h2>' + I("bell", 17) + " System &amp; SLA Notifications</h2>" +
-      "<p>Controls who gets pinged and when. Every setting on this page is saved system-wide to the backend and actively controls real email delivery.</p></div>" +
+      "<p>Controls who gets emailed and when. Changes apply system-wide right away.</p></div>" +
       '<div class="settings-card">' + statusModeRow + "</div>" +
       '<div class="settings-card" style="margin-top:16px">' + rows + "</div>";
   }
@@ -4032,7 +4032,7 @@
     var ticketCount = state.tickets.length;
     var userCount = getAllUsers().length;
     return '<div class="settings-panel-head"><h2>' + I("download", 17) + " Data Backup &amp; Restore</h2>" +
-      "<p>Tickets, SLA configurations, categories, and the team roster already save to the backend automatically as you work, so a refresh or a reopened tab never loses anything. Use Export to keep an offline snapshot or move your data to a different environment — Import replaces everything currently in the app with what's in the file.</p></div>" +
+      "<p>Everything already saves automatically as you work. Use Export for an offline snapshot, or Import to replace all current data with a backup file.</p></div>" +
       '<div class="settings-card"><p class="settings-card-title">Export</p>' +
       '<p style="font-size:12.5px;color:var(--text-dim);margin:0 0 14px;max-width:62ch">Downloads one .json file with all ' + ticketCount + ' current tickets (full history and comments included), both teams&#39; SLA configurations and categories, and all ' + userCount + ' roster members.</p>' +
       '<button type="button" class="btn-primary" data-action="export-backup">' + I("download", 14) + " Export / Backup Data</button>" +
