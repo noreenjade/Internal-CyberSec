@@ -173,7 +173,8 @@ async function initSchema() {
       action      TEXT NOT NULL,                -- "Created" | "Paused" | "Resumed" | "Resolved" | "Status Changed"
       time        BIGINT NOT NULL,              -- entry.time (ms epoch)
       note        TEXT,                         -- entry.note (nullable)
-      duration_ms BIGINT                        -- entry.durationMs (nullable, only set on "Resumed")
+      duration_ms BIGINT,                       -- entry.durationMs (nullable, only set on "Resumed")
+      actor_id    TEXT                          -- entry.actorId — which analyst made this change (nullable: older rows, or entries made before Google Sign-In was configured, never recorded one)
     );
     CREATE INDEX IF NOT EXISTS idx_history_ticket ON history(ticket_id);
 
@@ -301,6 +302,17 @@ async function initSchema() {
   )).rows.map((r) => r.column_name);
   if (!userColumns.includes("can_delete_tickets")) {
     await pool.query("ALTER TABLE users ADD COLUMN can_delete_tickets INTEGER NOT NULL DEFAULT 0");
+  }
+
+  // Migration: "actor_id" was added to history after some databases already
+  // had the table created — same bolt-on reason as above. Existing rows just
+  // keep a NULL actor (see historyRowToApiShape()'s "who made this change"
+  // comment) rather than being backfilled with a guess.
+  const historyColumns = (await pool.query(
+    "SELECT column_name FROM information_schema.columns WHERE table_name = 'history'"
+  )).rows.map((r) => r.column_name);
+  if (!historyColumns.includes("actor_id")) {
+    await pool.query("ALTER TABLE history ADD COLUMN actor_id TEXT");
   }
 
   // One-time data fix for the "SLA only counts once assigned" change: tickets
@@ -489,7 +501,7 @@ function commentRowToApiShape(row) {
 }
 
 function historyRowToApiShape(row) {
-  return { id: row.id, action: row.action, time: Number(row.time), note: row.note, durationMs: row.duration_ms != null ? Number(row.duration_ms) : null };
+  return { id: row.id, action: row.action, time: Number(row.time), note: row.note, durationMs: row.duration_ms != null ? Number(row.duration_ms) : null, actorId: row.actor_id || null };
 }
 
 async function getHistoryForTicket(ticketId) {
@@ -618,8 +630,8 @@ async function insertTicket(ticket) {
 async function insertHistory(entry) {
   await ready;
   await pool.query(
-    "INSERT INTO history (id, ticket_id, action, time, note, duration_ms) VALUES ($1, $2, $3, $4, $5, $6)",
-    [entry.id, entry.ticketId, entry.action, entry.time, entry.note || null, entry.durationMs != null ? entry.durationMs : null]
+    "INSERT INTO history (id, ticket_id, action, time, note, duration_ms, actor_id) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+    [entry.id, entry.ticketId, entry.action, entry.time, entry.note || null, entry.durationMs != null ? entry.durationMs : null, entry.actorId || null]
   );
 }
 
@@ -740,8 +752,8 @@ async function replaceAllTickets(tickets) {
       );
       for (const h of (t.history || [])) {
         await client.query(
-          "INSERT INTO history (id, ticket_id, action, time, note, duration_ms) VALUES ($1, $2, $3, $4, $5, $6)",
-          [h.id, t.id, h.action, h.time, h.note || null, h.durationMs != null ? h.durationMs : null]
+          "INSERT INTO history (id, ticket_id, action, time, note, duration_ms, actor_id) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+          [h.id, t.id, h.action, h.time, h.note || null, h.durationMs != null ? h.durationMs : null, h.actorId || null]
         );
       }
       for (const c of (t.comments || [])) {
