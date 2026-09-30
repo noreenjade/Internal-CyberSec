@@ -192,4 +192,4 @@ function notifyAsync(to, subject, text, options) {
   sendNotificationEmail(to, subject, text, options).catch((err) => console.error("[mailer] notifyAsync error:", err));
 }
 
-module.exports = { sendNotificationEmail, notifyAsync, smtpConfigured, buildTicketEmailHtml, emailShell, ticketCardHtml, ctaButtonHtml, ticketUrl, commentUrl, escapeHtml, APP_BASE_URL };
+module.exports = { sendNotificationEmail, notifyAsync, smtpConfigured, buildTicketEmailHtml, emailShell, ticketCardHtml, ctaButtonHtml, ticketUrl, commentUrl, escapeHtml, APP_BASE_URL, DEFAULT_FROM_NAME };
