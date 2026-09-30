@@ -2399,9 +2399,12 @@
     // Both objects derived from TEAMS (was a hardcoded {SOC,TI} literal
     // each) so a new team's tab renders with real counts instead of never
     // appearing in the tab row at all.
+    // Backlog tickets don't count toward a team's tab total — they're not
+    // part of the active workload until someone moves them back to the
+    // board (see the Backlog tab's own count, computed separately).
     var counts = {};
     Object.keys(TEAMS).forEach(function (key) {
-      counts[key] = state.tickets.filter(function (t) { return t.team === key; }).length;
+      counts[key] = state.tickets.filter(function (t) { return t.team === key && t.status !== "Backlog"; }).length;
     });
     var overdueCounts = {};
     Object.keys(TEAMS).forEach(function (key) { overdueCounts[key] = 0; });
