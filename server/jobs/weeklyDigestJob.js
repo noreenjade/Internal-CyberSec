@@ -58,7 +58,7 @@ async function sendWeeklyDigestIfDue() {
   if (digest.recipients.length === 0) {
     console.warn("[weekly-digest] Due to send, but no LEADERSHIP roster member has an email — skipping.");
   } else {
-    digest.recipients.forEach((email) => notifyAsync(email, digest.subject, digest.textBody));
+    digest.recipients.forEach((email) => notifyAsync(email, digest.subject, digest.textBody, { html: digest.htmlBody }));
     console.log("[weekly-digest] Sent to " + digest.recipients.join(", ") + " — " + digest.subject);
   }
   // Marked as handled either way, so a still-empty roster doesn't log that

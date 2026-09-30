@@ -35,6 +35,86 @@ function isPlaceholderEmail(to) {
   return !!domain && PLACEHOLDER_EMAIL_DOMAINS.indexOf(domain.toLowerCase()) !== -1;
 }
 
+// Where the "Open Ticketing System" button in every HTML email links to.
+// Derived from GOOGLE_REDIRECT_URI (already the one place the deployed
+// app's own public URL is configured) rather than adding a second env var
+// that could drift out of sync with it.
+const APP_BASE_URL = (process.env.GOOGLE_REDIRECT_URI || "").replace(/\/auth\/google\/callback\/?$/, "") || "http://localhost:" + (process.env.PORT || 4000);
+
+// Minimal HTML-entity escaping for values interpolated into email markup
+// (ticket titles/details, names) — these can contain arbitrary text typed
+// by an analyst, so this is the email equivalent of escapeHtml() in
+// tracker.html, not decorative.
+function escapeHtml(value) {
+  return String(value == null ? "" : value).replace(/[&<>"']/g, (ch) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+  }[ch]));
+}
+
+// Plain text -> minimal HTML paragraphs, so a multi-line ticket description
+// typed into a plain textarea doesn't collapse onto one line once dropped
+// into HTML (which ignores newlines by default).
+function textToHtmlParagraphs(text) {
+  return String(text || "")
+    .split(/\n{2,}/)
+    .map((para) => "<p style=\"margin:0 0 10px;white-space:pre-line;\">" + escapeHtml(para) + "</p>")
+    .join("");
+}
+
+function ctaButtonHtml(url, label) {
+  return '<a href="' + url + '" style="display:inline-block;background:#A8434A;color:#ffffff;text-decoration:none;' +
+    'font-size:14px;font-weight:600;padding:11px 24px;border-radius:6px;font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;">' +
+    escapeHtml(label) + "</a>";
+}
+
+// The ticket-details "card" shown inside most notification emails — ID,
+// title, and priority/team badges, colored from the ticket's own frozen
+// priorityConfig (or a neutral default when there's no ticket-specific
+// color, e.g. the weekly digest doesn't use this at all).
+function ticketCardHtml(ticket) {
+  if (!ticket) return "";
+  var cfg = ticket.priorityConfig || {};
+  var color = cfg.color || "#8B5CF6";
+  return '<div style="background:#f9fafb;border:1px solid #e5e7eb;border-left:4px solid ' + color + ';border-radius:8px;padding:16px 18px;margin:4px 0 22px;font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;">' +
+    '<div style="font-size:12px;font-weight:700;color:#6b7280;letter-spacing:.03em;margin-bottom:4px;">' + escapeHtml(ticket.id) + "</div>" +
+    '<div style="font-size:15px;font-weight:700;color:#111827;margin-bottom:10px;line-height:1.4;">' + escapeHtml(ticket.title) + "</div>" +
+    (ticket.priority ? '<span style="display:inline-block;font-size:11px;font-weight:700;padding:3px 10px;border-radius:999px;background:' + color + '22;color:' + color + ';border:1px solid ' + color + '55;font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;">' + escapeHtml(ticket.priority.toUpperCase()) + "</span>" : "") +
+    (ticket.team ? ' <span style="display:inline-block;font-size:11px;font-weight:600;padding:3px 10px;border-radius:999px;background:#eef2f7;color:#374151;font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;">' + escapeHtml(ticket.team) + "</span>" : "") +
+    "</div>";
+}
+
+// The one shared shell every notification email renders inside — brand bar,
+// white card, footer disclaimer. bodyHtml is whatever the specific
+// notification (assignment, comment, SLA breach, digest...) builds for its
+// own middle section.
+function emailShell(bodyHtml) {
+  return '<!doctype html><html><body style="margin:0;padding:0;background:#f4f5f7;">' +
+    '<div style="font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;background:#f4f5f7;padding:32px 16px;">' +
+    '<div style="max-width:540px;margin:0 auto;background:#ffffff;border-radius:10px;overflow:hidden;border:1px solid #e5e7eb;">' +
+    '<div style="background:#171317;padding:18px 28px;">' +
+    '<span style="color:#ffffff;font-size:15px;font-weight:700;">Internal CyberSec Practice</span>' +
+    '<span style="color:#9ca3af;font-size:12px;margin-left:8px;">SOC &amp; Threat Hunt</span>' +
+    "</div>" +
+    '<div style="padding:28px;">' + bodyHtml + "</div>" +
+    '<div style="padding:14px 28px;background:#f9fafb;border-top:1px solid #e5e7eb;">' +
+    '<p style="margin:0;font-size:11px;color:#9ca3af;line-height:1.5;">This is an automated notification from the Internal CyberSec Practice ticketing system. Please don’t reply to this address directly unless a reply-to name is shown above.</p>' +
+    "</div></div></div></body></html>";
+}
+
+// Composes the shell + a heading + a message + (optionally) a ticket card +
+// a CTA button — the shape every ticket-related notification (assignment,
+// reassignment, comment, mention, status change, resolve, SLA breach)
+// shares. The weekly digest is different enough (a report, not a single-
+// ticket event) that it builds its own bodyHtml and calls emailShell()
+// directly instead of this.
+function buildTicketEmailHtml({ heading, message, ticket, ctaLabel }) {
+  var body = '<h2 style="margin:0 0 14px;font-size:18px;color:#111827;font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;">' + escapeHtml(heading) + "</h2>" +
+    '<div style="font-size:14px;color:#374151;line-height:1.6;margin-bottom:20px;font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;">' + textToHtmlParagraphs(message) + "</div>" +
+    ticketCardHtml(ticket) +
+    ctaButtonHtml(APP_BASE_URL, ctaLabel || "Open Ticketing System");
+  return emailShell(body);
+}
+
 // options.fromName / options.replyTo let a notification show who actually
 // triggered it (the ticket's requester, a comment author) instead of always
 // reading as sent by whoever's SMTP_USER credentials are configured — the
@@ -44,6 +124,10 @@ function isPlaceholderEmail(to) {
 // NAME on that address is just a string and can be anything. replyTo routes
 // an actual reply to the person who did the thing, not to whoever's account
 // is doing the sending.
+// options.html carries the formatted version built by buildTicketEmailHtml()
+// (or a call site's own emailShell()-based markup) — sent alongside the
+// plain-text body so a client that can't/won't render HTML still gets a
+// readable fallback instead of a blank message.
 async function sendNotificationEmail(to, subject, text, options) {
   options = options || {};
   if (!smtpConfigured || !to) return false;
@@ -61,6 +145,7 @@ async function sendNotificationEmail(to, subject, text, options) {
       to,
       subject,
       text,
+      html: options.html || undefined,
       replyTo: options.replyTo || undefined
     });
     return true;
@@ -76,4 +161,4 @@ function notifyAsync(to, subject, text, options) {
   sendNotificationEmail(to, subject, text, options).catch((err) => console.error("[mailer] notifyAsync error:", err));
 }
 
-module.exports = { sendNotificationEmail, notifyAsync, smtpConfigured };
+module.exports = { sendNotificationEmail, notifyAsync, smtpConfigured, buildTicketEmailHtml, emailShell, ticketCardHtml, ctaButtonHtml, escapeHtml, APP_BASE_URL };

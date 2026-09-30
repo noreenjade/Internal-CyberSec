@@ -17,6 +17,7 @@ const express = require("express");
 const db = require("../db");
 const { TERMINAL_STATUSES } = require("../constants");
 const { asyncRoute } = require("../util");
+const { emailShell, ctaButtonHtml, escapeHtml, APP_BASE_URL } = require("../mailer");
 
 const router = express.Router();
 
@@ -103,6 +104,8 @@ async function buildDigestPreview() {
     });
   }
 
+  const htmlBody = buildDigestHtml({ generatedAt: now, total, onTimeCount, breachedCount, overdueOpenCount: overdueOpen.length, breachedResolvedCount: breachedResolved.length, pausedCount, complianceRatePct, breachedTickets });
+
   return {
     generatedAt: now,
     subject,
@@ -117,8 +120,60 @@ async function buildDigestPreview() {
       complianceRatePct
     },
     breachedTickets,
-    textBody: lines.join("\n")
+    textBody: lines.join("\n"),
+    htmlBody
   };
+}
+
+// Report-shaped HTML for the weekly digest — different from the single-
+// ticket-event template in mailer.js (buildTicketEmailHtml), but shares the
+// same emailShell() wrapper so it still looks like it belongs to the same
+// app. A KPI strip up top, then a table of breached tickets (or a plain
+// "all clear" line when there are none).
+function buildDigestHtml({ generatedAt, total, onTimeCount, breachedCount, overdueOpenCount, breachedResolvedCount, pausedCount, complianceRatePct, breachedTickets }) {
+  const kpi = (label, value, color) =>
+    '<td style="padding:14px 10px;text-align:center;border:1px solid #e5e7eb;border-radius:8px;">' +
+    '<div style="font-size:22px;font-weight:800;color:' + (color || "#111827") + ';">' + escapeHtml(value) + "</div>" +
+    '<div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:.03em;margin-top:2px;">' + escapeHtml(label) + "</div></td>";
+
+  const kpiRow = '<table role="presentation" width="100%" cellpadding="0" cellspacing="6" style="margin-bottom:22px;">' +
+    "<tr>" +
+    kpi("Total", total) +
+    kpi("On-time", onTimeCount, "#16a34a") +
+    kpi("Breached", breachedCount, breachedCount > 0 ? "#dc2626" : "#111827") +
+    kpi("Compliance", complianceRatePct + "%", complianceRatePct >= 90 ? "#16a34a" : complianceRatePct >= 70 ? "#d97706" : "#dc2626") +
+    "</tr></table>";
+
+  const sub = '<p style="margin:0 0 18px;font-size:12px;color:#6b7280;">' +
+    overdueOpenCount + " still open &middot; " + breachedResolvedCount + " resolved late &middot; " + pausedCount + " paused (excluded from the SLA clock)</p>";
+
+  let breachedHtml;
+  if (!breachedTickets.length) {
+    breachedHtml = '<p style="font-size:14px;color:#374151;">No breached tickets right now. ✅</p>';
+  } else {
+    const rows = breachedTickets.map((b) =>
+      '<tr>' +
+      '<td style="padding:9px 10px;border-bottom:1px solid #e5e7eb;font-size:12px;font-weight:700;color:#6b7280;white-space:nowrap;">' + escapeHtml(b.id) + "</td>" +
+      '<td style="padding:9px 10px;border-bottom:1px solid #e5e7eb;font-size:13px;color:#111827;">' + escapeHtml(b.title) + "</td>" +
+      '<td style="padding:9px 10px;border-bottom:1px solid #e5e7eb;font-size:12px;color:#374151;white-space:nowrap;">' + escapeHtml(b.assignee) + "</td>" +
+      '<td style="padding:9px 10px;border-bottom:1px solid #e5e7eb;font-size:12px;color:#dc2626;">' + escapeHtml(b.detail) + "</td>" +
+      "</tr>"
+    ).join("");
+    breachedHtml = '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin-bottom:20px;">' +
+      "<thead><tr>" +
+      '<th style="text-align:left;padding:6px 10px;font-size:11px;color:#6b7280;border-bottom:2px solid #e5e7eb;">ID</th>' +
+      '<th style="text-align:left;padding:6px 10px;font-size:11px;color:#6b7280;border-bottom:2px solid #e5e7eb;">Title</th>' +
+      '<th style="text-align:left;padding:6px 10px;font-size:11px;color:#6b7280;border-bottom:2px solid #e5e7eb;">Assignee</th>' +
+      '<th style="text-align:left;padding:6px 10px;font-size:11px;color:#6b7280;border-bottom:2px solid #e5e7eb;">Status</th>' +
+      "</tr></thead><tbody>" + rows + "</tbody></table>";
+  }
+
+  const body = '<h2 style="margin:0 0 4px;font-size:18px;color:#111827;font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;">Weekly SLA Compliance Digest</h2>' +
+    '<p style="margin:0 0 20px;font-size:12px;color:#9ca3af;">Generated ' + escapeHtml(new Date(generatedAt).toLocaleString()) + "</p>" +
+    kpiRow + sub + breachedHtml +
+    ctaButtonHtml(APP_BASE_URL, "Open Ticketing System");
+
+  return emailShell(body);
 }
 
 router.get("/notifications/digest-preview", asyncRoute(async (req, res) => {
