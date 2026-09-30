@@ -1991,6 +1991,10 @@
     analyticsTeamFilter: "All", // "All" | "SOC" | "TI" — preview-only, not persisted
     analyticsDateFilter: "All Time", // "Today" | "This Week" | "All Time" — preview-only, not persisted
     showOverdueOnly: false,
+    // Off by default — the Resolved column stays visible until someone
+    // deliberately checks "Hide Resolved" to declutter the board. Only
+    // Resolved is affected; Rejected/Canceled columns are untouched.
+    hideResolved: false,
     onlyMyTickets: false,
     assigneeFilter: "", // "" = All Assignees, "unassigned" = Unassigned, else a user id
     clientFilter: "", // "" = All Clients, else a value from CLIENTS
@@ -2459,6 +2463,7 @@
         '<label class="overdue-toggle"><input type="checkbox" data-action="toggle-overdue-only"' + (state.showOverdueOnly ? " checked" : "") + "> Show Overdue Only" +
         (state.showOverdueOnly && odTeam > 0 ? '<span class="mono" style="color:var(--danger)">(' + odTeam + ")</span>" : "") +
         "</label>" +
+        '<label class="overdue-toggle"><input type="checkbox" data-action="toggle-hide-resolved"' + (state.hideResolved ? " checked" : "") + "> Hide Resolved</label>" +
         // Bulk delete (Select mode + Delete Selected) is superadmin-only —
         // deleting tickets one at a time is still open to everyone (see
         // delete-ticket in the modal), but selecting many at once and
@@ -2599,9 +2604,22 @@
   }
 
   function renderBoard() {
-    var visibleColumns = state.statusFilter === "All" ? STATUSES : [state.statusFilter];
+    // Explicitly selecting "Resolved" in the sidebar always shows that
+    // column regardless of hideResolved — the toggle only collapses it out
+    // of the "All" overview.
+    var statusColumns = state.hideResolved ? STATUSES.filter(function (s) { return s !== "Resolved"; }) : STATUSES;
+    var visibleColumns = state.statusFilter === "All" ? statusColumns : [state.statusFilter];
     var visibleTickets = filteredTeamTickets();
-    if (state.statusFilter !== "All") visibleTickets = visibleTickets.filter(function (t) { return t.status === state.statusFilter; });
+    if (state.statusFilter !== "All") {
+      visibleTickets = visibleTickets.filter(function (t) { return t.status === state.statusFilter; });
+    } else if (state.hideResolved) {
+      // Must drop these here, before grouping below — otherwise a Resolved
+      // ticket has no matching column in `grouped` and the fallback for a
+      // genuinely corrupt/unexpected status string (grouped[STATUSES[0]])
+      // would wrongly dump every hidden Resolved ticket into the New column
+      // instead of actually hiding it.
+      visibleTickets = visibleTickets.filter(function (t) { return normalizeStatus(t.status) !== "Resolved"; });
+    }
     if (state.priorityFilter) visibleTickets = visibleTickets.filter(function (t) { return t.priority === state.priorityFilter; });
 
     var grouped = {};
@@ -5111,6 +5129,7 @@
     var action = el.getAttribute("data-action");
     if (!action) return;
     if (action === "toggle-overdue-only") { state.showOverdueOnly = el.checked; render(); return; }
+    if (action === "toggle-hide-resolved") { state.hideResolved = el.checked; render(); return; }
     if (action === "toggle-ticket-select") {
       var ticketId = el.getAttribute("data-id");
       var idx = state.selectedTicketIds.indexOf(ticketId);
