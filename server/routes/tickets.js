@@ -24,7 +24,7 @@ const express = require("express");
 const db = require("../db");
 const { STATUSES, TERMINAL_STATUSES, PRIORITIES, TEAMS, CLIENTS, DEFAULT_CLIENT } = require("../constants");
 const { uid, extractMentions, asyncRoute } = require("../util");
-const { notifyAsync, buildTicketEmailHtml, commentUrl } = require("../mailer");
+const { notifyAsync, buildTicketEmailHtml, commentUrl, DEFAULT_FROM_NAME } = require("../mailer");
 
 const router = express.Router();
 
@@ -70,14 +70,14 @@ async function notifyAssignmentChange(ticket, oldAssignees) {
   if (sameAssigneeSet(oldAssignees, newAssignees)) return;
   const prefs = await db.getNotificationPrefs();
 
-  // Shows the ticket's requester as the visible sender (see mailer.js) when
-  // the requester matches a real roster user — falls back to the shared
-  // account's own address/display name otherwise (department requesters,
-  // typos, external requesters).
+  // Every notification leads with the same "Internal CyberSec Practice"
+  // brand (see mailer.js's DEFAULT_FROM_NAME), with who/what appended when
+  // there's a real requester to name — replyTo routes an actual reply to
+  // them, not to whichever inbox SMTP_USER happens to be.
   const requester = await findRequesterUser(ticket);
   const isNewAssignment = isUnassigned(oldAssignees) && !isUnassigned(newAssignees);
   const mailOptions = requester
-    ? { fromName: requester.name + " - " + (isNewAssignment ? "Create Ticket" : "Reassign Ticket"), replyTo: requester.email }
+    ? { fromName: DEFAULT_FROM_NAME + " — " + (isNewAssignment ? "New Ticket" : "Reassigned Ticket") + " by " + requester.name, replyTo: requester.email }
     : undefined;
 
   const added = newAssignees.filter((id) => oldAssignees.indexOf(id) === -1);
@@ -459,7 +459,8 @@ router.post("/tickets/:id/comments", asyncRoute(async (req, res) => {
 
   const author = await db.getUserById(authorId);
   const authorName = author ? author.name : "Someone";
-  const mailOptions = author ? { fromName: authorName + " - Add Comment", replyTo: author.email } : undefined;
+  // Same "brand — event by X" pattern as notifyAssignmentChange above.
+  const mailOptions = author ? { fromName: DEFAULT_FROM_NAME + " — New Comment by " + authorName, replyTo: author.email } : undefined;
 
   // Notify each of the ticket's assignees of the new comment, unless they're
   // the one who just posted it, or they're also @mentioned in this same

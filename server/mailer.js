@@ -139,6 +139,15 @@ function buildTicketEmailHtml({ heading, message, ticket, ctaLabel, ctaUrl }) {
   return emailShell(body);
 }
 
+// Every outgoing email shows this as its sender name unless a call site
+// gives a more specific one (see options.fromName below) — without it, any
+// notification that doesn't already have a "requester/author did this" story
+// to tell (comments' author lookup failing, SLA breaches, the weekly digest,
+// plain status-change emails) fell back to displaying the raw SMTP_FROM
+// address with no name at all, which read as coming from whichever inbox
+// happens to be configured rather than "the ticketing system."
+const DEFAULT_FROM_NAME = "Internal CyberSec Practice";
+
 // options.fromName / options.replyTo let a notification show who actually
 // triggered it (the ticket's requester, a comment author) instead of always
 // reading as sent by whoever's SMTP_USER credentials are configured — the
@@ -161,9 +170,7 @@ async function sendNotificationEmail(to, subject, text, options) {
   }
   try {
     const fromAddress = process.env.SMTP_FROM || process.env.SMTP_USER;
-    const from = options.fromName
-      ? '"' + String(options.fromName).replace(/"/g, "") + '" <' + fromAddress + ">"
-      : fromAddress;
+    const from = '"' + String(options.fromName || DEFAULT_FROM_NAME).replace(/"/g, "") + '" <' + fromAddress + ">";
     await transporter.sendMail({
       from,
       to,
@@ -185,4 +192,4 @@ function notifyAsync(to, subject, text, options) {
   sendNotificationEmail(to, subject, text, options).catch((err) => console.error("[mailer] notifyAsync error:", err));
 }
 
-module.exports = { sendNotificationEmail, notifyAsync, smtpConfigured, buildTicketEmailHtml, emailShell, ticketCardHtml, ctaButtonHtml, ticketUrl, commentUrl, escapeHtml, APP_BASE_URL };
+module.exports = { sendNotificationEmail, notifyAsync, smtpConfigured, buildTicketEmailHtml, emailShell, ticketCardHtml, ctaButtonHtml, ticketUrl, commentUrl, escapeHtml, APP_BASE_URL, DEFAULT_FROM_NAME };
