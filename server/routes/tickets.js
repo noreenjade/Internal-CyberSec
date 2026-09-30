@@ -70,15 +70,13 @@ async function notifyAssignmentChange(ticket, oldAssignees) {
   if (sameAssigneeSet(oldAssignees, newAssignees)) return;
   const prefs = await db.getNotificationPrefs();
 
-  // Shows the ticket's requester as the visible sender (see mailer.js) when
-  // the requester matches a real roster user — falls back to the shared
-  // account's own address/display name otherwise (department requesters,
-  // typos, external requesters).
+  // Every notification shows the same "Internal CyberSec Practice" sender
+  // (see mailer.js's DEFAULT_FROM_NAME) — only replyTo is personalized, so a
+  // reply routes to the actual requester when they match a real roster user
+  // instead of whichever inbox SMTP_USER happens to be.
   const requester = await findRequesterUser(ticket);
   const isNewAssignment = isUnassigned(oldAssignees) && !isUnassigned(newAssignees);
-  const mailOptions = requester
-    ? { fromName: requester.name + " - " + (isNewAssignment ? "Create Ticket" : "Reassign Ticket"), replyTo: requester.email }
-    : undefined;
+  const mailOptions = requester ? { replyTo: requester.email } : undefined;
 
   const added = newAssignees.filter((id) => oldAssignees.indexOf(id) === -1);
   const removed = oldAssignees.filter((id) => newAssignees.indexOf(id) === -1);
@@ -459,7 +457,9 @@ router.post("/tickets/:id/comments", asyncRoute(async (req, res) => {
 
   const author = await db.getUserById(authorId);
   const authorName = author ? author.name : "Someone";
-  const mailOptions = author ? { fromName: authorName + " - Add Comment", replyTo: author.email } : undefined;
+  // Same consistent "Internal CyberSec Practice" sender as everywhere else
+  // (see notifyAssignmentChange above) — only replyTo is personalized.
+  const mailOptions = author ? { replyTo: author.email } : undefined;
 
   // Notify each of the ticket's assignees of the new comment, unless they're
   // the one who just posted it, or they're also @mentioned in this same
