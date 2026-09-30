@@ -3559,11 +3559,9 @@
       // every ticket they file just starts as New, same as before this
       // field existed.
       (isSuperAdmin(state.currentUserId)
-        ? '<div class="form-grid-2">' +
-          '<div><p class="section-label">Status</p><select class="field-input" data-action="create-set-status">' +
+        ? '<div><p class="section-label">Status</p><select class="field-input" data-action="create-set-status">' +
           ["New", "Backlog"].map(function (s) { return '<option value="' + s + '"' + (s === f.status ? " selected" : "") + ">" + s + "</option>"; }).join("") +
-          "</select><p class=\"hint\">" + (f.status === "Backlog" ? "Timer won't start until it's moved to the board." : "Starts on the active board right away.") + "</p></div>" +
-          "<div></div></div>"
+          "</select><p class=\"hint\">" + (f.status === "Backlog" ? "Timer won't start until it's moved to the board." : "Starts on the active board right away.") + "</p></div>"
         : "") +
       '<div class="form-grid-2">' +
       '<div style="min-width:0"><p class="section-label">Assignees</p>' + assigneePickerHtml("create", usersForTeam(f.team), f.assignees) + "</div>" +
