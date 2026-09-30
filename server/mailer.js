@@ -80,7 +80,31 @@ function ticketCardHtml(ticket) {
     '<div style="font-size:15px;font-weight:700;color:#111827;margin-bottom:10px;line-height:1.4;">' + escapeHtml(ticket.title) + "</div>" +
     (ticket.priority ? '<span style="display:inline-block;font-size:11px;font-weight:700;padding:3px 10px;border-radius:999px;background:' + color + '22;color:' + color + ';border:1px solid ' + color + '55;font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;">' + escapeHtml(ticket.priority.toUpperCase()) + "</span>" : "") +
     (ticket.team ? ' <span style="display:inline-block;font-size:11px;font-weight:600;padding:3px 10px;border-radius:999px;background:#eef2f7;color:#374151;font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;">' + escapeHtml(ticket.team) + "</span>" : "") +
+    (ticket.details ? '<div style="margin-top:12px;padding-top:12px;border-top:1px solid #e5e7eb;">' +
+      '<div style="font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:.03em;margin-bottom:4px;">Details</div>' +
+      '<div style="font-size:13px;color:#374151;line-height:1.6;white-space:pre-line;">' + escapeHtml(ticket.details) + "</div>" +
+      "</div>" : "") +
     "</div>";
+}
+
+// The email's "View Ticket" / "Open Ticketing System" button should land
+// directly on the ticket in question, not just the board root — tracker.html
+// reads this ?ticket= param once on load (see applyDeepLinkTicketIfAny())
+// and opens that ticket's detail modal automatically. Links straight at
+// /tracker.html (not just "/"), since server.js's "/" -> "/tracker.html"
+// redirect doesn't forward the query string — going through it would lose
+// ?ticket= entirely. Falls back to the plain app URL for notifications that
+// aren't about one specific ticket (the weekly digest builds its own CTA).
+function ticketUrl(ticket) {
+  return ticket ? APP_BASE_URL + "/tracker.html?ticket=" + encodeURIComponent(ticket.id) : APP_BASE_URL;
+}
+
+// Same idea as ticketUrl(), but for a "View Comment" link (a new-comment or
+// @mention notification) — adds &comment=<id> so tracker.html's deep-link
+// handler also scrolls to and briefly highlights that specific comment once
+// the ticket opens, not just the ticket in general.
+function commentUrl(ticket, commentId) {
+  return ticketUrl(ticket) + "&comment=" + encodeURIComponent(commentId);
 }
 
 // The one shared shell every notification email renders inside — brand bar,
@@ -107,11 +131,11 @@ function emailShell(bodyHtml) {
 // shares. The weekly digest is different enough (a report, not a single-
 // ticket event) that it builds its own bodyHtml and calls emailShell()
 // directly instead of this.
-function buildTicketEmailHtml({ heading, message, ticket, ctaLabel }) {
+function buildTicketEmailHtml({ heading, message, ticket, ctaLabel, ctaUrl }) {
   var body = '<h2 style="margin:0 0 14px;font-size:18px;color:#111827;font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;">' + escapeHtml(heading) + "</h2>" +
     '<div style="font-size:14px;color:#374151;line-height:1.6;margin-bottom:20px;font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;">' + textToHtmlParagraphs(message) + "</div>" +
     ticketCardHtml(ticket) +
-    ctaButtonHtml(APP_BASE_URL, ctaLabel || "Open Ticketing System");
+    ctaButtonHtml(ctaUrl || ticketUrl(ticket), ctaLabel || "Open Ticketing System");
   return emailShell(body);
 }
 
@@ -161,4 +185,4 @@ function notifyAsync(to, subject, text, options) {
   sendNotificationEmail(to, subject, text, options).catch((err) => console.error("[mailer] notifyAsync error:", err));
 }
 
-module.exports = { sendNotificationEmail, notifyAsync, smtpConfigured, buildTicketEmailHtml, emailShell, ticketCardHtml, ctaButtonHtml, escapeHtml, APP_BASE_URL };
+module.exports = { sendNotificationEmail, notifyAsync, smtpConfigured, buildTicketEmailHtml, emailShell, ticketCardHtml, ctaButtonHtml, ticketUrl, commentUrl, escapeHtml, APP_BASE_URL };

@@ -567,7 +567,11 @@
   .history-delete { margin-left: auto; display: flex; align-items: center; gap: 4px; border-radius: 5px; border: 1px solid var(--border-soft); background: var(--panel-alt); color: var(--text-dim); padding: 3px 6px; flex-shrink: 0; }
   .history-delete:hover { border-color: rgba(239,68,68,0.6); background: var(--danger-soft); color: var(--danger); }
 
-  .comment-item { display: flex; gap: 10px; }
+  .comment-item { display: flex; gap: 10px; border-radius: var(--radius-sm); transition: background-color 1.2s ease; }
+  /* Briefly flashed on the comment a "View Comment" email link deep-links
+     to (see applyDeepLinkTicketIfAny()) so it's obvious which one of
+     possibly many comments the email was actually about. */
+  .comment-item.deep-link-highlight { background-color: var(--accent-soft); }
   .comment-head { display: flex; align-items: baseline; gap: 8px; }
   .comment-author { font-weight: 700; font-size: 12px; color: var(--text); }
   .comment-time { color: var(--text-dimmer); font-family: var(--font-mono); font-size: 10px; }
@@ -1757,6 +1761,41 @@
   // state.tickets with the server's data once the fetch completes. If the
   // fetch itself fails, INITIAL_TICKETS is used as the same "keep the app
   // usable" fallback the old version used for "storage unavailable".
+  // "View Ticket" in a notification email links to "?ticket=<id>" so it
+  // opens straight to that ticket's detail modal instead of just landing on
+  // whichever board happened to be default — called once tickets have
+  // actually loaded (findTicket needs state.tickets populated first).
+  // Wrapped defensively since a deep link is a nicety on top of the normal
+  // board, never something that should be able to break page load if the
+  // URL is malformed or the ticket no longer exists.
+  // Set by applyDeepLinkTicketIfAny() when the URL also names a specific
+  // comment (a "View Comment" email link, not just "View Ticket") — read and
+  // cleared by render() once the comment's element actually exists in the
+  // freshly-built DOM to scroll to and briefly highlight it.
+  var pendingScrollToCommentId = null;
+  function applyDeepLinkTicketIfAny() {
+    try {
+      var params = new URLSearchParams(window.location.search);
+      var wanted = params.get("ticket");
+      if (!wanted) return;
+      var t = findTicket(wanted);
+      if (t) {
+        state.team = t.team;
+        state.selectedId = t.id;
+        state.view = "board";
+        var wantedComment = params.get("comment");
+        if (wantedComment && (t.comments || []).some(function (c) { return c.id === wantedComment; })) {
+          pendingScrollToCommentId = wantedComment;
+        }
+      }
+      // Strips the query params so refreshing (or re-sharing the URL from the
+      // address bar later) doesn't keep re-opening/re-scrolling to the same
+      // ticket/comment.
+      window.history.replaceState({}, "", window.location.pathname + window.location.hash);
+    } catch (err) {
+      console.error("Could not apply deep-linked ticket:", err);
+    }
+  }
   function loadTickets() {
     fetch(API_BASE_URL + "/tickets")
       .then(function (res) { return res.json(); })
@@ -1771,6 +1810,7 @@
         // right back — seed the diff baseline with what we just received.
         lastSyncedTicketsById = {};
         state.tickets.forEach(function (t) { lastSyncedTicketsById[t.id] = JSON.stringify(t); });
+        applyDeepLinkTicketIfAny();
         render();
       })
       .catch(function (err) {
@@ -3272,7 +3312,7 @@
 
           if (editingCommentId === c.id) {
             var draftVal = editingCommentDraft != null ? editingCommentDraft : c.text;
-            return '<div class="comment-item">' + avatarHtml(userName(c.authorId)) + '<div style="flex:1">' +
+            return '<div class="comment-item" id="comment-' + c.id + '">' + avatarHtml(userName(c.authorId)) + '<div style="flex:1">' +
               '<div class="comment-head"><span class="comment-author">' + escapeHtml(userName(c.authorId)) + '</span><span class="comment-time mono">' + formatClock(c.time) + editedTag + "</span></div>" +
               '<textarea class="comment-area" style="margin-top:6px" data-role="edit-comment-input" data-id="' + t.id + '" data-comment="' + c.id + '">' + escapeHtml(draftVal) + "</textarea>" +
               '<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:6px">' +
@@ -3281,7 +3321,7 @@
               "</div></div></div>";
           }
 
-          return '<div class="comment-item">' + avatarHtml(userName(c.authorId)) + '<div style="flex:1">' +
+          return '<div class="comment-item" id="comment-' + c.id + '">' + avatarHtml(userName(c.authorId)) + '<div style="flex:1">' +
             '<div class="comment-head"><span class="comment-author">' + escapeHtml(userName(c.authorId)) + '</span><span class="comment-time mono">' + formatClock(c.time) + editedTag + "</span>" +
             (canModify
               ? '<span style="margin-left:auto;display:flex;gap:4px">' +
@@ -4146,6 +4186,21 @@
           newAgencySearchInput.focus();
           newAgencySearchInput.setSelectionRange(agencySearchSelection.start, agencySearchSelection.end);
         }
+      }
+      // A "View Comment" email link (see applyDeepLinkTicketIfAny()) — the
+      // comment's own element only exists once the ticket detail modal this
+      // render() just built includes it, so this has to run here, not at the
+      // point pendingScrollToCommentId was set. One-shot: cleared right
+      // after so it doesn't re-trigger on every subsequent render() while
+      // the modal stays open.
+      if (pendingScrollToCommentId) {
+        var commentEl = document.getElementById("comment-" + pendingScrollToCommentId);
+        if (commentEl) {
+          commentEl.scrollIntoView({ block: "center" });
+          commentEl.classList.add("deep-link-highlight");
+          setTimeout(function () { commentEl.classList.remove("deep-link-highlight"); }, 2500);
+        }
+        pendingScrollToCommentId = null;
       }
       // Every action in this app funnels through render() — persisting here,
       // rather than in each individual action handler, guarantees tickets,

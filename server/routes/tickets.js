@@ -24,7 +24,7 @@ const express = require("express");
 const db = require("../db");
 const { STATUSES, TERMINAL_STATUSES, PRIORITIES, TEAMS, CLIENTS, DEFAULT_CLIENT } = require("../constants");
 const { uid, extractMentions, asyncRoute } = require("../util");
-const { notifyAsync, buildTicketEmailHtml } = require("../mailer");
+const { notifyAsync, buildTicketEmailHtml, commentUrl } = require("../mailer");
 
 const router = express.Router();
 
@@ -459,7 +459,8 @@ router.post("/tickets/:id/comments", asyncRoute(async (req, res) => {
       heading: "New comment on your ticket",
       message: authorName + " wrote:\n\n" + text,
       ticket,
-      ctaLabel: "View Comment"
+      ctaLabel: "View Comment",
+      ctaUrl: commentUrl(ticket, comment.id)
     });
     for (const assigneeId of ticket.assignees) {
       if (assigneeId === authorId || mentionedIds.indexOf(assigneeId) !== -1) continue;
@@ -478,7 +479,8 @@ router.post("/tickets/:id/comments", asyncRoute(async (req, res) => {
     heading: "You were mentioned in a comment",
     message: authorName + " mentioned you:\n\n" + text,
     ticket,
-    ctaLabel: "View Comment"
+    ctaLabel: "View Comment",
+    ctaUrl: commentUrl(ticket, comment.id)
   });
   for (const userId of mentionedIds.filter((mid) => mid !== authorId)) {
     const mentionedUser = await db.getUserById(userId);
