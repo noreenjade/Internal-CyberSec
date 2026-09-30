@@ -3541,9 +3541,6 @@
       Object.keys(TEAMS).map(function (k) {
         return '<button type="button" class="' + (f.team === k ? "active" : "") + '" data-action="create-set-team" data-team="' + k + '">' + escapeHtml(TEAMS[k]) + "</button>";
       }).join("") + "</div></div>" +
-      (isSuperAdmin(state.currentUserId)
-        ? '<label class="overdue-toggle"><input type="checkbox" data-action="create-toggle-backlog"' + (f.toBacklog ? " checked" : "") + "> " + I("archive", 12) + " Put this in Backlog instead (timer won't start until it's moved to the board)</label>"
-        : "") +
       '<div><p class="section-label">Title</p><input type="text" class="field-input" placeholder="Short summary of the task" data-role="create-title" value="' + escapeHtml(f.title) + '"></div>' +
       '<div><p class="section-label">' + (f.team === "TI" ? "Hunt Notes" : "Details") + '</p><textarea class="details-area" placeholder="Additional context, links, or notes" data-role="create-details">' + escapeHtml(f.details) + "</textarea>" +
       '<div data-role="details-links" data-id="create">' + detectedLinksHtml(f.details) + "</div></div>" +
@@ -3570,6 +3567,13 @@
       '<button type="button" class="dropzone" data-action="trigger-file" data-id="create">' + I("paperclip", 20) + '<span style="font-size:12px;font-weight:600">Click to attach files</span></button>' +
       (f.attachments.length ? '<div style="margin-top:10px;display:flex;flex-direction:column;gap:6px">' + attachmentRowsHtml(f.attachments, "create-delete-attachment", "create") + "</div>" : "") +
       '<p class="format-note">Accepted formats: PDF, PNG, JPG, JPEG, DOC, DOCX, XLS, XLSX, TXT</p></div>' +
+      (isSuperAdmin(state.currentUserId)
+        ? '<label style="display:flex;align-items:flex-start;gap:10px;padding:12px 14px;border:1px solid var(--border-soft);border-radius:var(--radius-sm);background:var(--panel-alt);cursor:pointer">' +
+          '<input type="checkbox" style="margin-top:2px" data-action="create-toggle-backlog"' + (f.toBacklog ? " checked" : "") + ">" +
+          '<div><div style="font-size:13px;font-weight:700;color:var(--text)">' + I("archive", 12) + ' Save to Backlog instead</div>' +
+          '<p class="hint" style="margin-top:3px">Not urgent yet — the timer won\'t start until someone moves it to the board.</p></div>' +
+          "</label>"
+        : "") +
       "</div>" +
       '<div class="modal-footer">' +
       '<button type="button" class="btn-ghost" data-action="close-create">Cancel</button>' +
