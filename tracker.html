@@ -3505,7 +3505,8 @@
       client: DEFAULT_CLIENT,
       agency: "", // "" = General/No specific agency; only meaningful when client === "NSOC"
       agencyQuery: "", // raw text currently typed in the Agency combobox input
-      attachments: [] // files picked before the ticket exists — sent along with the create POST, same {id,name,size,addedAt,dataUrl} shape as an existing ticket's
+      attachments: [], // files picked before the ticket exists — sent along with the create POST, same {id,name,size,addedAt,dataUrl} shape as an existing ticket's
+      toBacklog: false // when checked, the ticket is filed straight into Backlog instead of New (SLA frozen from creation — see submitCreateTicket())
     };
   }
 
@@ -3532,6 +3533,7 @@
       Object.keys(TEAMS).map(function (k) {
         return '<button type="button" class="' + (f.team === k ? "active" : "") + '" data-action="create-set-team" data-team="' + k + '">' + escapeHtml(TEAMS[k]) + "</button>";
       }).join("") + "</div></div>" +
+      '<label class="overdue-toggle"><input type="checkbox" data-action="create-toggle-backlog"' + (f.toBacklog ? " checked" : "") + "> " + I("archive", 12) + " Send straight to Backlog (SLA frozen until moved to the board)</label>" +
       '<div><p class="section-label">Title</p><input type="text" class="field-input" placeholder="Short summary of the task" data-role="create-title" value="' + escapeHtml(f.title) + '"></div>' +
       '<div><p class="section-label">' + (f.team === "TI" ? "Hunt Notes" : "Details") + '</p><textarea class="details-area" placeholder="Additional context, links, or notes" data-role="create-details">' + escapeHtml(f.details) + "</textarea>" +
       '<div data-role="details-links" data-id="create">' + detectedLinksHtml(f.details) + "</div></div>" +
@@ -5168,7 +5170,8 @@
           client: f.client || DEFAULT_CLIENT,
           agency: f.client === "NSOC" ? (f.agency || "") : "",
           attachments: f.attachments || [],
-          createdBy: state.currentUserId
+          createdBy: state.currentUserId,
+          status: f.toBacklog ? "Backlog" : "New"
         })
       }).then(function (res) {
         if (!res.ok) throw new Error("HTTP " + res.status);
@@ -5332,6 +5335,7 @@
       render();
       return;
     }
+    if (action === "create-toggle-backlog") { createForm.toBacklog = el.checked; render(); return; }
     if (action === "create-set-priority") { createForm.priority = el.value; render(); return; }
     if (action === "create-set-category") { createForm.category = el.value; render(); return; }
     if (action === "create-set-client") {

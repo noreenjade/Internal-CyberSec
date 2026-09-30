@@ -240,6 +240,13 @@ router.post("/tickets", asyncRoute(async (req, res) => {
   // time instead of added afterward.
   const attachments = Array.isArray(body.attachments) ? body.attachments.filter((a) => a && a.name) : [];
 
+  // A brand-new ticket can only start as "New" or "Backlog" (deprioritized
+  // right from filing) — every other status only makes sense as a later
+  // transition (In Progress/Resolved/Rejected/Canceled all imply work that
+  // hasn't happened yet for a ticket that doesn't exist yet), so anything
+  // else falls back to "New" rather than erroring.
+  const initialStatus = body.status === "Backlog" ? "Backlog" : "New";
+
   if (TEAMS.indexOf(team) === -1) return res.status(400).json({ error: "team must be one of: " + TEAMS.join(", ") });
   if (!title) return res.status(400).json({ error: "title is required" });
   if (!details) return res.status(400).json({ error: "details is required" });
@@ -279,6 +286,11 @@ router.post("/tickets", asyncRoute(async (req, res) => {
   // ticket IS assigned right at creation, the clock starts immediately, same
   // as it always has.
   const slaDate = isUnassigned(assignees) ? 0 : createdAt + priorityConfig.hours * 3600 * 1000;
+  // Same freeze rule as moving an existing ticket INTO Backlog via PATCH/the
+  // bulk PUT (see changeStatus() in tracker.html) — only relevant once the
+  // clock has actually started (slaDate !== 0); an unassigned ticket filed
+  // straight to Backlog has nothing to freeze yet either way.
+  const backlogSince = initialStatus === "Backlog" && slaDate !== 0 ? createdAt : null;
   const id = await db.nextTicketId(team);
 
   await db.insertTicket({
@@ -290,7 +302,7 @@ router.post("/tickets", asyncRoute(async (req, res) => {
     category,
     client,
     agency,
-    status: "New",
+    status: initialStatus,
     requestedBy,
     assignees,
     createdAt,
@@ -298,7 +310,8 @@ router.post("/tickets", asyncRoute(async (req, res) => {
     priorityColor: priorityConfig.color,
     priorityLabel: priorityConfig.label,
     slaDate,
-    attachments
+    attachments,
+    backlogSince
   });
 
   // Prefers the authenticated session's id (req.user.sub) once Google
@@ -307,7 +320,7 @@ router.post("/tickets", asyncRoute(async (req, res) => {
   // no-auth-configured deployments, mirroring how comments already trust
   // client-supplied authorId.
   const actorId = (req.user && req.user.sub) || body.createdBy || null;
-  await db.insertHistory({ id: uid(), ticketId: id, action: "Created", time: createdAt, note: "Ticket opened as New", actorId });
+  await db.insertHistory({ id: uid(), ticketId: id, action: "Created", time: createdAt, note: "Ticket opened as " + initialStatus, actorId });
 
   const ticket = await db.getTicketById(id);
 
