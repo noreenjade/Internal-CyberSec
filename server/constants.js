@@ -108,11 +108,11 @@ const SEED_USERS = [
   { id: "u3", name: "Andre Val Consorte", role: "Sr. SE", isAdmin: true, email: "andre.consorte@maroonstudios.com", team: "SOC" },
   { id: "u4", name: "Rhea Lorenzana", role: "L1", isAdmin: false, email: "rhea.lorenzana@maroonstudios.com", team: "SOC" },
   { id: "u5", name: "Gabriel Jethro Anunciacion", role: "L1", isAdmin: false, email: "gabriel.anunciacion@maroonstudios.com", team: "SOC" },
-  { id: "u6", name: "Miguel Luayon", role: "L1", isAdmin: false, email: "mluayon@company.com", team: "TI" },
-  { id: "u7", name: "Rod Valdez", role: "SE", isAdmin: true, email: "rvaldez@company.com", team: "TI" },
-  { id: "u8", name: "Jeshrine Zoe Nogar", role: "SE", isAdmin: false, email: "jnogar@company.com", team: "TI" },
-  { id: "u9", name: "Alessander Vill Mondero", role: "L1", isAdmin: false, email: "amondero@company.com", team: "TI" },
-  { id: "u10", name: "Jason Obrero", role: "Practice Head", isAdmin: true, email: "jobrero@company.com", team: "LEADERSHIP" }
+  { id: "u6", name: "Miguel Luayon", role: "L1", isAdmin: false, email: "miguel.luayon@maroonstudios.com", team: "TI" },
+  { id: "u7", name: "Rod Valdez", role: "SE", isAdmin: true, email: "rod.valdez@maroonstudios.com", team: "TI" },
+  { id: "u8", name: "Jeshrine Zoe Nogar", role: "SE", isAdmin: false, email: "jeshrine.nogar@maroonstudios.com", team: "TI" },
+  { id: "u9", name: "Alessander Vill Mondero", role: "L1", isAdmin: false, email: "alessander.mondero@maroonstudios.com", team: "TI" },
+  { id: "u10", name: "Jason Obrero", role: "Practice Head", isAdmin: true, email: "jason.obrero@maroonstudios.com", team: "LEADERSHIP" }
 ];
 
 module.exports = {
