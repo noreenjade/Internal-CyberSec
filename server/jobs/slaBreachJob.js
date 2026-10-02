@@ -31,7 +31,7 @@ const { TERMINAL_STATUSES } = require("../constants");
 const CHECK_INTERVAL_MS = 5 * 60 * 1000; // how often to scan for newly-breached tickets
 
 function slaFrozen(t) {
-  return t.isPaused || t.unassignedSince != null;
+  return t.isPaused || t.unassignedSince != null || t.backlogSince != null;
 }
 function slaNotStarted(t) {
   return t.slaDate === 0;
@@ -39,6 +39,7 @@ function slaNotStarted(t) {
 function remainingMs(t, now) {
   if (t.isPaused && t.pausedAt) return t.slaDate - t.pausedAt;
   if (t.unassignedSince != null) return t.slaDate - t.unassignedSince;
+  if (t.backlogSince != null) return t.slaDate - t.backlogSince;
   return t.slaDate - now;
 }
 function isOverdue(t, now) {

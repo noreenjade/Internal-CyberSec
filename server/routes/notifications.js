@@ -25,10 +25,11 @@ function isPausedOpen(t) {
   return TERMINAL_STATUSES.indexOf(t.status) === -1 && t.isPaused;
 }
 
-// Paused tickets have a frozen SLA clock (same rule as isOverdue() in
-// tracker.html) — never counted as overdue while paused.
+// Paused, unassigned-frozen, or Backlog tickets have a frozen SLA clock
+// (same rule as isOverdue()/slaFrozen() in tracker.html) — never counted as
+// overdue while frozen.
 function isOverdueOpen(t, now) {
-  if (TERMINAL_STATUSES.indexOf(t.status) !== -1 || t.isPaused) return false;
+  if (TERMINAL_STATUSES.indexOf(t.status) !== -1 || t.isPaused || t.unassignedSince != null || t.backlogSince != null) return false;
   return now > t.slaDate;
 }
 
