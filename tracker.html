@@ -2768,6 +2768,7 @@
         : "") +
       "</div>" +
       (state.searchQuery ? '<span class="board-search-count mono">' + tickets.length + " match" + (tickets.length === 1 ? "" : "es") + "</span>" : "") +
+      '<button type="button" class="btn-primary" style="margin-left:auto" data-action="open-create-backlog">+ New Ticket</button>' +
       "</div>";
 
     return toolbar + '<div class="board-area">' +
@@ -3536,7 +3537,11 @@
   // RENDER — CREATE TICKET MODAL
   // =====================================================================
   var createForm = null;
-  function freshCreateForm(defaultTeam) {
+  // defaultStatus is "New" from the regular board's "+ New Ticket" button,
+  // or "Backlog" from the Backlog page's own "+ New Ticket" (see
+  // open-create-backlog) — which entry point you used decides it, there's
+  // no Status field in the form itself anymore.
+  function freshCreateForm(defaultTeam, defaultStatus) {
     return {
       team: defaultTeam,
       title: "",
@@ -3549,7 +3554,7 @@
       agency: "", // "" = General/No specific agency; only meaningful when client === "NSOC"
       agencyQuery: "", // raw text currently typed in the Agency combobox input
       attachments: [], // files picked before the ticket exists — sent along with the create POST, same {id,name,size,addedAt,dataUrl} shape as an existing ticket's
-      status: "New" // "New" | "Backlog" — shown as its own field, superadmin-only (see createModalHtml()); a ticket filed straight to Backlog has its SLA clock frozen from creation (see submitCreateTicket())
+      status: defaultStatus === "Backlog" ? "Backlog" : "New" // a ticket filed straight to Backlog has its SLA clock frozen from creation (see submitCreateTicket())
     };
   }
 
@@ -3569,9 +3574,14 @@
 
     return '<div class="modal-overlay" data-action="overlay-close-create">' +
       '<div class="modal-panel narrow" data-stop-close>' +
-      '<div class="modal-head"><h2 class="modal-title" style="font-size:15px">Create Ticket</h2>' +
+      '<div class="modal-head"><h2 class="modal-title" style="font-size:15px">Create Ticket' +
+      (f.status === "Backlog" ? ' <span class="badge-category" style="vertical-align:middle">' + I("archive", 10) + " Backlog</span>" : "") +
+      "</h2>" +
       '<button type="button" class="icon-btn" data-action="close-create" style="border:none">' + I("x", 20) + "</button></div>" +
       '<div class="modal-body">' +
+      (f.status === "Backlog"
+        ? '<p class="footnote" style="margin:0;color:var(--text-dim)">This ticket will go straight to Backlog — its timer won\'t start until it\'s moved to the board.</p>'
+        : "") +
       '<div><p class="section-label">Team</p><div class="team-toggle">' +
       Object.keys(TEAMS).map(function (k) {
         return '<button type="button" class="' + (f.team === k ? "active" : "") + '" data-action="create-set-team" data-team="' + k + '">' + escapeHtml(TEAMS[k]) + "</button>";
@@ -3586,15 +3596,6 @@
       '<select class="field-input" data-action="create-set-category">' + categoryOptions + "</select>" +
       "</div>" +
       "</div>" +
-      // Superadmin-only, same gate as the Backlog tab itself (see
-      // renderTeamTabs()) — a regular analyst never sees a choice here and
-      // every ticket they file just starts as New, same as before this
-      // field existed.
-      (isSuperAdmin(state.currentUserId)
-        ? '<div><p class="section-label">Status</p><select class="field-input" data-action="create-set-status">' +
-          ["New", "Backlog"].map(function (s) { return '<option value="' + s + '"' + (s === f.status ? " selected" : "") + ">" + s + "</option>"; }).join("") +
-          "</select><p class=\"hint\">" + (f.status === "Backlog" ? "Timer won't start until it's moved to the board." : "Starts on the active board right away.") + "</p></div>"
-        : "") +
       '<div class="form-grid-2">' +
       '<div style="min-width:0"><p class="section-label">Assignees</p>' + assigneePickerHtml("create", usersForTeam(f.team), f.assignees) + "</div>" +
       '<div><p class="section-label">Requested By</p><input type="text" class="field-input" placeholder="Name or email" data-role="create-requestedby" value="' + escapeHtml(f.requestedBy) + '">' +
@@ -4540,6 +4541,16 @@
     if (action === "settings-nav") { state.settingsPanel = el.getAttribute("data-panel"); render(); return; }
     if (action === "toggle-overdue-only") { return; } // handled in change listener
     if (action === "open-create") { createForm = freshCreateForm(state.team); state.createOpen = true; openAssigneeDropdownFor = null; render(); return; }
+    if (action === "open-create-backlog") {
+      // Defense-in-depth to match the button itself being hidden for a
+      // non-superadmin — see renderBacklog().
+      if (!isSuperAdmin(state.currentUserId)) return;
+      createForm = freshCreateForm(state.team, "Backlog");
+      state.createOpen = true;
+      openAssigneeDropdownFor = null;
+      render();
+      return;
+    }
     if (action === "toggle-select-mode") {
       // Defense-in-depth to match the button itself not rendering at all
       // for someone without delete access — see renderTeamTabs().
@@ -5391,7 +5402,6 @@
       render();
       return;
     }
-    if (action === "create-set-status") { createForm.status = el.value; render(); return; }
     if (action === "create-set-priority") { createForm.priority = el.value; render(); return; }
     if (action === "create-set-category") { createForm.category = el.value; render(); return; }
     if (action === "create-set-client") {
